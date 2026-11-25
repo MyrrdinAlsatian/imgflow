@@ -17,8 +17,13 @@ function describe(error: unknown): string {
 }
 
 /**
- * Composes the predicted foreground mask with the existing alpha of the oriented, resized image.
- * Bounds the model input independently of the requested WebP dimensions.
+ * Runs inference on a bounded RGB frame, then scales the mask to the output dimensions.
+ * Multiplies both alpha values so inference never makes a transparent pixel more opaque.
+ *
+ * @param image - Sharp pipeline with orientation and output resizing already configured.
+ * @param remove - Estimator that returns one opacity byte per inference pixel.
+ * @returns A Sharp pipeline for the masked RGBA pixels at the resized image dimensions.
+ * @throws If inference fails or the returned mask has the wrong number of pixels.
  */
 async function applyForeground(image: Sharp, remove: BackgroundRemover): Promise<Sharp> {
   const { data: pixels, info } = await image
@@ -57,7 +62,7 @@ async function applyForeground(image: Sharp, remove: BackgroundRemover): Promise
  * Creates a WebP converter for single-frame JPEG, PNG or WebP files.
  * Applies EXIF orientation before resizing, preserves alpha and strips source metadata.
  *
- * @param remover - Optional alpha estimator invoked before encoding.
+ * @param remover - Optional alpha estimator invoked after orientation and resizing, before encoding.
  * @returns A converter that reports dimensions after the complete WebP is published.
  */
 export const createSharpWebpConverter =

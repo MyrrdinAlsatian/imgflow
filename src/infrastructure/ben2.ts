@@ -7,10 +7,12 @@ import type { BackgroundRemover } from "../application/background-remover.ts";
 
 /**
  * Opens one BEN2 FP16 session on the native CPU backend using the local model cache.
+ * Configures Transformers.js for local model loading for the lifetime of this process.
  *
  * @param cache - Directory containing `ben2/config.json`, `ben2/preprocessor_config.json`
  *   and `ben2/onnx/model_fp16.onnx`.
- * @returns The reusable alpha estimator and an operation that releases its native session.
+ * @returns A reusable alpha estimator and its `close` operation. Call `close` once all
+ * inference calls have settled. A watch command shares one session across its jobs.
  * @throws If a required file is unavailable or ONNX Runtime cannot initialize the model.
  */
 export async function openBen2(cache: string) {
@@ -38,6 +40,7 @@ export async function openBen2(cache: string) {
     },
   });
 
+  /** Returns the single-channel segmentation mask at the dimensions passed to BEN2. */
   const remove: BackgroundRemover = async ({ width, height, pixels }) => {
     const rgb = new Uint8ClampedArray(pixels.buffer, pixels.byteOffset, pixels.byteLength);
     const [foreground] = await segment(new RawImage(rgb, width, height, 3));

@@ -13,6 +13,13 @@ const files = {
   "onnx/model_fp16.onnx": "dfdc25f421f32a0d1268e0f2ff2153d340e8f1d52d3dd16f5dc33c1ce85cedf1",
 };
 
+/**
+ * Checks a cache entry against its pinned SHA-256 by streaming its contents.
+ *
+ * @param path - File to verify.
+ * @param expected - Expected lowercase hexadecimal SHA-256 digest.
+ * @throws If the file cannot be read or its digest differs.
+ */
 async function verify(path: string, expected: string): Promise<void> {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(path)) hash.update(chunk);
@@ -21,7 +28,15 @@ async function verify(path: string, expected: string): Promise<void> {
   }
 }
 
-/** Verifies an existing cache entry or stages and checks a download before making it visible. */
+/**
+ * Verifies an existing cache entry or downloads a missing entry to a temporary file.
+ * A successful digest check is required before moving the download to its final path.
+ *
+ * @param cache - Cache root containing the `ben2` directory.
+ * @param name - Path relative to the pinned model repository and to the local `ben2` directory.
+ * @param expected - Pinned lowercase hexadecimal SHA-256 digest.
+ * @throws If download, validation or publication fails. An existing entry is left in place.
+ */
 async function prepare(cache: string, name: string, expected: string): Promise<void> {
   const path = join(cache, "ben2", name);
   const exists = await stat(path).catch((error: unknown) => {

@@ -1,4 +1,8 @@
-/** @file Measures one cold image and three warm images using the same offline CPU session. */
+/**
+ * @file Reports BEN2 CPU timings and process peak RSS as JSON.
+ * Session opening has its own timer. The first image is the cold run, followed by three
+ * sequential runs of the same image with the loaded session. Temporary WebPs are removed at exit.
+ */
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { availableParallelism, cpus, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +21,7 @@ if (!inputPath || !cache || extra.length) {
     const { remove, close } = await openBen2(cache);
     const sessionMs = Math.round(performance.now() - loadStart);
     try {
+      /** Time spent in the mask adapter, including preprocessing and mask resizing. */
       let maskPipelineMs = 0;
       const convert = createSharpWebpConverter(async (image) => {
         const start = performance.now();

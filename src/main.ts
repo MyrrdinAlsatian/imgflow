@@ -13,7 +13,13 @@ const usage = [
 ].join("\n");
 const [command, ...args] = process.argv.slice(2);
 
-/** Loads BEN2 only for explicitly enabled conversions. The caller owns the session lifetime. */
+/**
+ * Composes the WebP converter for one CLI invocation.
+ *
+ * @param cache - Model cache directory, or undefined to use the original alpha.
+ * @returns The converter and, when BEN2 is loaded, a disposal callback to await after the final job.
+ * @throws If a native adapter or the requested local model cannot be loaded.
+ */
 async function openConverter(cache: string | undefined) {
   const { convertWithSharp, createSharpWebpConverter } =
     await import("./infrastructure/sharp-webp.ts");
