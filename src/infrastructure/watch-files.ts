@@ -112,6 +112,7 @@ export async function moveOriginal(
   }
 }
 
+/** Roles of the directories used to claim inputs, publish variants and retain originals. */
 export type WatchDirectories = Readonly<{
   input: string;
   processing: string;
@@ -132,7 +133,15 @@ export function watchDirectories(root: string): WatchDirectories {
   };
 }
 
-/** Opens the storage adapter and creates the directories before the watcher can claim files. */
+/**
+ * Ensures the managed directories exist and prepares operations for claims and output batches.
+ * Staging lives under the output directory so a complete batch can be published by renaming it
+ * on the same volume.
+ *
+ * @param directories - Absolute paths for one pipeline's inputs, work and retained files.
+ * @returns The input path, the storage port implementation and the claim operation.
+ * @throws If a directory cannot be created or an existing managed path is not a directory.
+ */
 export async function openWatchStorage({
   input,
   processing,

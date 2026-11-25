@@ -5,7 +5,15 @@ import { createPipelineRenderer } from "./sharp-pipeline.ts";
 import { loadWatchConfig } from "./watch-config.ts";
 import { runWatchFolders } from "./watch-folder.ts";
 
-/** Opens the validated YAML pipelines and owns the lifetime of their shared BEN2 session. */
+/**
+ * Validates the YAML and starts every configured folder. Pipelines that remove backgrounds
+ * share one local BEN2 session, with one inference at a time.
+ *
+ * @param file - YAML configuration file to load before starting any watchers.
+ * @param shutdown - Signal to stop admissions and finish jobs already in progress.
+ * @returns Resolves after watcher shutdown and release of the model session, when loaded.
+ * @throws On invalid configuration, model initialization failure or a watch service error.
+ */
 export async function runConfiguredWatch(file: string, shutdown: AbortSignal): Promise<void> {
   const { settings, pipelines } = await loadWatchConfig(file);
   if (shutdown.aborted) return;

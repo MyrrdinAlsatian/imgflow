@@ -13,7 +13,11 @@ export type ClaimedImage = Readonly<{
 /** A completed file in a private staging directory. The name is a single path component. */
 export type RenderedVariant = Readonly<{ name: string; dimensions: ImageDimensions }>;
 
-/** Renders all variants into the provided directory, or rejects before any are published. */
+/**
+ * Encodes a claimed original into an existing, private staging directory.
+ * Resolves with relative filenames and dimensions for the complete batch. The storage adapter
+ * publishes the directory on success or removes it after a render failure.
+ */
 export type JobRenderer = (
   original: string,
   stagingDirectory: string,
@@ -23,7 +27,7 @@ type PublishedVariant = Readonly<{ path: string; dimensions: ImageDimensions }>;
 
 /** Storage operations for a job whose original has already been claimed. */
 export type WatchJobStorage = Readonly<{
-  /** Stages a complete batch and returns final paths after its publication. */
+  /** Publishes the complete staging directory in one operation and returns the final variant paths. */
   publish(job: ClaimedImage, render: JobRenderer): Promise<readonly PublishedVariant[]>;
   /** Moves the original after publication and returns its archive path. */
   archive(job: ClaimedImage): Promise<string>;

@@ -9,6 +9,7 @@ import { applyForeground, openSharpImage, readRgba } from "./sharp-image.ts";
 
 type Transform = Exclude<PipelineStep, { type: "export" }>;
 type StepByType = { [Step in Transform as Step["type"]]: Step };
+/** Maps each transformation kind to a handler with the corresponding validated options. */
 type StepRegistry = {
   [Name in keyof StepByType]: (image: Sharp, step: StepByType[Name]) => Promise<Sharp>;
 };
@@ -19,7 +20,13 @@ async function materialize(image: Sharp): Promise<Sharp> {
   return sharp(data, { raw });
 }
 
-/** Crops to the foreground bounds, retaining the configured margin within the image. */
+/**
+ * Crops around pixels whose alpha is at least 16 out of 255, with a proportional margin
+ * clipped to the original bounds. Keeps the frame dimensions if no pixel meets the threshold.
+ *
+ * @param image - Frame at this step of the pipeline.
+ * @param padding - Fraction of the foreground width and height added on each side.
+ */
 async function trimForeground(image: Sharp, padding: number): Promise<Sharp> {
   const { data, raw } = await readRgba(image);
   const { width, height } = raw;
@@ -71,7 +78,15 @@ function applyStep<Name extends keyof StepByType>(
   return registry[step.type](image, step);
 }
 
-/** Compiles a validated pipeline into a renderer that writes only to its staging directory. */
+/**
+ * Builds a renderer that completes each transformation in order, then encodes the variants
+ * independently from the final frame.
+ *
+ * @param steps - Validated sequence ending with one export step.
+ * @param remover - Foreground estimator used by a background removal step.
+ * @returns A renderer that reports every staged file and its encoded dimensions.
+ * Source, transformation and encoder failures reject the render. Step errors include the step position.
+ */
 export function createPipelineRenderer(
   steps: readonly PipelineStep[],
   remover?: BackgroundRemover,

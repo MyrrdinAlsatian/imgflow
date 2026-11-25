@@ -10,7 +10,13 @@ const maskSize = 1024;
 // Release input file handles before the watcher moves originals on Windows.
 sharp.cache({ files: 0 });
 
-/** Validates the source and opens a single-frame image without applying transformations. */
+/**
+ * Checks that the source is a regular, single-frame JPEG, PNG or WebP within the input pixel limit.
+ *
+ * @param inputPath - Path to the source image.
+ * @returns A Sharp pipeline that can still fail when an operation decodes the pixels.
+ * @throws If the source is inaccessible or its headers are invalid or unsupported.
+ */
 export async function openSharpImage(inputPath: string): Promise<Sharp> {
   if (!(await stat(inputPath)).isFile()) {
     throw new Error(`Input must be a regular file: "${inputPath}".`);
@@ -28,7 +34,10 @@ export async function openSharpImage(inputPath: string): Promise<Sharp> {
   return image;
 }
 
-/** Materializes a Sharp operation as a packed, four-channel sRGB image. */
+/**
+ * Executes pending Sharp operations and returns packed sRGB pixels and their actual dimensions.
+ * The buffer has four bytes per pixel in RGBA order. Pixels without source alpha become opaque.
+ */
 export async function readRgba(image: Sharp) {
   const { data, info } = await image
     .toColourspace("srgb")
@@ -42,6 +51,11 @@ export async function readRgba(image: Sharp) {
 /**
  * Runs inference on a bounded RGB frame, scales the mask back, and multiplies it with the
  * image's alpha so inference never makes a pixel more opaque.
+ *
+ * @param image - Pipeline whose pending transformations determine the output frame.
+ * @param remove - Estimator that returns one opacity byte per inference pixel.
+ * @returns A Sharp pipeline over the masked pixels at the input frame's materialized dimensions.
+ * @throws If decoding or inference fails, or the mask length differs from the pixel count.
  */
 export async function applyForeground(image: Sharp, remove: BackgroundRemover): Promise<Sharp> {
   const { data: pixels, raw } = await readRgba(image);

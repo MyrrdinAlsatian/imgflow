@@ -87,6 +87,7 @@ const schema = v.strictObject({
   ),
 });
 
+/** Formats a schema issue path with dotted keys and bracketed array indexes. */
 function issuePath(issue: v.BaseIssue<unknown>): string {
   const keys = issue.path ?? [];
   return (
@@ -122,7 +123,14 @@ function includesPath(parent: string, child: string): boolean {
   );
 }
 
-/** Loads and validates every pipeline before starting any watchers. */
+/**
+ * Parses YAML, applies defaults and validates step order, output names and directory overlaps.
+ *
+ * @param file - Configuration file. Relative directory and model paths use its parent as their base.
+ * @returns Resolved settings and typed pipelines ready for watcher setup.
+ * @throws If the file cannot be read, YAML parsing fails or a configuration rule is violated.
+ * Validation errors identify the field where possible.
+ */
 export async function loadWatchConfig(file: string) {
   const path = resolve(file);
   const base = dirname(path);

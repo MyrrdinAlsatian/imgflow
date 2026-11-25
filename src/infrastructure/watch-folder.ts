@@ -76,6 +76,7 @@ export function runWatchFolder(
   );
 }
 
+/** A non-recursive input folder, its work directories and its renderer. */
 type WatchPipeline = Readonly<{
   id?: string;
   directories: WatchDirectories;
@@ -83,7 +84,16 @@ type WatchPipeline = Readonly<{
   render: JobRenderer;
 }>;
 
-/** Prepares all folders, then watches them with a shared job queue and shutdown signal. */
+/**
+ * Prepares all storage adapters before opening watchers. One queue limits jobs across all inputs.
+ *
+ * @param pipelines - Folder configurations with validated, disjoint directories.
+ * @param concurrency - Maximum number of active jobs across the whole service.
+ * @param logger - Logger used for lifecycle and job events, scoped by pipeline when an ID is present.
+ * @param shutdown - Signal to stop claiming deposits and let in-flight jobs finish.
+ * @returns Resolves after all watchers have closed and job handling has settled.
+ * @throws If storage setup fails or a watcher fails. A watcher failure stops the other watchers too.
+ */
 export async function runWatchFolders(
   pipelines: readonly WatchPipeline[],
   concurrency: number,
