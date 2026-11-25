@@ -18,7 +18,7 @@ import pino from "pino";
 import sharp from "sharp";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { WebpConverter } from "../src/application/process-image.ts";
-import { convertWithSharp } from "../src/infrastructure/sharp-webp.ts";
+import { convertWithSharp, createSharpWebpConverter } from "../src/infrastructure/sharp-webp.ts";
 import { moveOriginal, readFileStamp } from "../src/infrastructure/watch-files.ts";
 import { runWatchFolder } from "../src/infrastructure/watch-folder.ts";
 
@@ -169,6 +169,27 @@ test("drains the active conversion and processes the pending deposit on the next
   );
   expect(await readdir(join(root, "input"))).toEqual([]);
   expect(await readdir(join(root, "archive"))).toHaveLength(2);
+});
+
+test("retains the original and publishes no output when inference fails", async () => {
+  const source = join(fixtures, "oriented.jpg");
+  await copyFile(source, join(root, "input", "photo.jpg"));
+  const messages = await start(
+    createSharpWebpConverter(async () => {
+      throw new Error("Inference failed");
+    }),
+  );
+  await vi.waitFor(() => expect(messages.some((line) => line.includes("Image failed"))).toBe(true));
+
+  const [job] = await waitForEntries("failed", 1);
+  if (!job) throw new Error("Failed job directory is missing.");
+  expect(await readFile(join(root, "failed", job, "original", "photo.jpg"))).toEqual(
+    await readFile(source),
+  );
+  expect(await readFile(join(root, "failed", job, "error.json"), "utf8")).toContain(
+    "Inference failed",
+  );
+  expect(await readdir(join(root, "output"))).toEqual([]);
 });
 
 test("on EXDEV, publishes a verified copy before removing the source", async () => {

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { createSharpWebpConverter } from "../src/infrastructure/sharp-webp.ts";
 
 const entryPoint = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const fixtures = fileURLToPath(new URL("./fixtures/", import.meta.url));
@@ -80,6 +81,65 @@ test("preserves PNG transparency without enlarging the image", async () => {
     .toBuffer({ resolveWithObject: true });
   expect(info).toMatchObject({ width: 9, height: 6, channels: 4 });
   expect(data[3]).toBe(128);
+});
+
+test("combines a soft foreground mask with existing transparency", async () => {
+  const inputPath = join(fixtures, "transparent.png");
+  const outputPath = join(directory, "foreground.webp");
+  const convert = createSharpWebpConverter(async ({ width, height, pixels }) => {
+    expect([width, height, pixels.length]).toEqual([9, 6, 9 * 6 * 3]);
+    const mask = new Uint8Array(width * height).fill(255);
+    mask.set([0, 128]);
+    return mask;
+  });
+
+  await convert({ inputPath, outputPath, width: 1600, height: 1600, quality: 90 });
+
+  const rgba = await sharp(await readFile(outputPath))
+    .raw()
+    .toBuffer();
+  expect([rgba[3], rgba[7], rgba[11]]).toEqual([0, 64, 128]);
+});
+
+test("resizes the model mask to the output dimensions without changing the framing", async () => {
+  const inputPath = join(directory, "wide.png");
+  const outputPath = join(directory, "foreground.webp");
+  await sharp({
+    create: { width: 1040, height: 32, channels: 3, background: "orange" },
+  })
+    .png()
+    .toFile(inputPath);
+  const convert = createSharpWebpConverter(async ({ width, height }) => {
+    expect(width).toBe(1024);
+    const mask = new Uint8Array(width * height);
+    for (let y = 0; y < height; y++) mask.fill(255, y * width + width / 2, (y + 1) * width);
+    return mask;
+  });
+
+  await convert({ inputPath, outputPath, width: 1200, height: 100, quality: 85 });
+
+  const { data, info } = await sharp(await readFile(outputPath))
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  expect(info).toMatchObject({ width: 1040, height: 32, channels: 4 });
+  expect([data[3], data[1039 * 4 + 3]]).toEqual([0, 255]);
+});
+
+test("reports a missing BEN2 cache without modifying the source or publishing a file", async () => {
+  const inputPath = join(directory, "original.jpg");
+  await copyFile(join(fixtures, "oriented.jpg"), inputPath);
+  const result = run(
+    inputPath,
+    "foreground.webp",
+    "--remove-background",
+    "--model-cache",
+    join(directory, "models"),
+  );
+
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain("BEN2 model file is unavailable");
+  expect(await readdir(directory)).toEqual(["original.jpg"]);
+  expect(await readFile(inputPath)).toEqual(await readFile(join(fixtures, "oriented.jpg")));
 });
 
 test("rejects a truncated JPEG and removes its staged output", async () => {

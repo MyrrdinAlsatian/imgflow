@@ -1,6 +1,28 @@
 # Protocole de mesure
 
-La première campagne de traitement d’images démarrera avec le moteur de Phase 1. Le protocole de détourage s’appliquera à la Phase 3.
+## Reproduire le test BEN2
+
+```sh
+corepack pnpm model:prepare
+corepack pnpm bench:ben2 chemin/vers/image.png
+```
+
+Le script mesure l’ouverture de la session, puis une première conversion à froid et trois conversions à chaud de la même image, en séquence. Il rapporte pour chacune le temps de la pipeline de masque (prétraitement, inférence et remise à l’échelle), le temps de conversion WebP, la taille de sortie et le pic RSS du processus. Le second argument sélectionne le répertoire du cache. [Révision du modèle](adr/0005-local-ben2.md)
+
+## Premier essai sur CPU Windows x64
+
+Node 24.14.0, AMD Ryzen 7 3700X (16 CPU logiques), ONNX Runtime Node 1.30.0, quatre threads intra-op. Ouverture de la session en **1,60 s**. Pic RSS du processus après quatre conversions de **4,42 Gio** (4 637 872 Kio). L’accès réseau par `fetch` était désactivé pendant le test.
+
+La photo NASA d’Eileen Collins (512 × 512) provient du fichier `skimage/data/astronaut.png` de scikit-image v0.25.2. Son SHA-256 est `88431cd9653ccd539741b555fb0a46b61558b301d4110412b5bc28b5e3ea6cb5`. Chaque sortie pèse 41 964 octets. [Fichier source](https://github.com/scikit-image/scikit-image/blob/v0.25.2/skimage/data/astronaut.png) · [Provenance et droits](https://scikit-image.org/docs/0.25.x/api/skimage.data.html#skimage.data.astronaut)
+
+| Conversion | Pipeline du masque | Conversion WebP complète |
+| ---------- | ------------------ | ------------------------ |
+| À froid    | 11,016 s           | 11,092 s                 |
+| À chaud 1  | 11,015 s           | 11,092 s                 |
+| À chaud 2  | 10,604 s           | 10,682 s                 |
+| À chaud 3  | 10,428 s           | 10,505 s                 |
+
+Le dossier surveillé compilé a produit un WebP RGBA 512 × 512 et une archive identique à la source. L’alpha décodé vaut 0 au point de fond (10, 10) et 254 au point du sujet (220, 100). L’image de référence ne fournit pas de masque annoté. Cet essai vérifie le parcours complet et laisse l’évaluation de la qualité sur un corpus et la validation Linux ouvertes.
 
 ## Conditions reproductibles
 

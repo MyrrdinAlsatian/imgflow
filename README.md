@@ -49,6 +49,20 @@ Déposer les fichiers directement dans `data/input/`. Le service traite un fichi
 
 Les journaux JSON sur la sortie standard indiquent l’identifiant du job et les chemins utiles. Pour arrêter le service, utiliser Ctrl+C ou envoyer SIGTERM sous Linux. Le traitement engagé se termine et les fichiers encore en attente restent dans `input/`. Après un arrêt brutal ou un échec de déplacement, examiner `processing/` à l’aide des journaux. La reprise des jobs déjà pris en charge est prévue en Phase 5.
 
+## Détourer une image avec BEN2
+
+Préparer le cache une fois sur une machine connectée. Cette commande télécharge l’export BEN2 FP16 épinglé (219 Mo) et vérifie la somme SHA-256 de chaque fichier. On peut ensuite copier le dossier `models/ben2/` sur une autre machine.
+
+```sh
+corepack pnpm model:prepare
+node dist/main.js process photo.jpg photo.webp --remove-background
+node dist/main.js watch ./data --remove-background --model-cache ./models
+```
+
+Le détourage est activé par `--remove-background`. Le cache par défaut est `./models`. Le modèle travaille sur CPU avec le backend natif d’ONNX Runtime et lit uniquement les fichiers locaux. Le dossier surveillé réutilise la même session pour tous ses dépôts. Le WebP conserve les dimensions prévues pour la conversion et combine le masque de premier plan avec la transparence déjà présente. Si le cache est incomplet, la commande indique le chemin manquant.
+
+Les mesures de temps et de mémoire se reproduisent avec `corepack pnpm bench:ben2 photo.jpg`. [Protocole et résultats](docs/benchmarks.md)
+
 ## Commandes de développement
 
 Utiliser `corepack pnpm <script>`, ou `pnpm <script>` si le lanceur pnpm utilise la version épinglée.

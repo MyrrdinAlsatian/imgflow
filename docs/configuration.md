@@ -1,6 +1,6 @@
 # Configuration YAML cible
 
-La lecture de ce format est prévue en Phase 4. En Phase 0, le point d’entrée s’exécute directement et ne lit aucun fichier de configuration.
+La lecture de ce format est prévue en Phase 4. En Phase 3, la ligne de commande active le détourage avec `--remove-background` et sélectionne le cache avec `--model-cache`.
 
 ```yaml
 version: 1

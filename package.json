@@ -8,14 +8,17 @@
     "start": "node dist/main.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "lint": "oxlint --deny-warnings src tests",
+    "lint": "oxlint --deny-warnings src tests scripts",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "model:prepare": "node scripts/prepare-ben2.ts",
+    "bench:ben2": "node scripts/benchmark-ben2.ts",
     "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run start"
   },
   "dependencies": {
+    "@huggingface/transformers": "4.3.2",
     "chokidar": "6.0.0",
     "p-queue": "10.0.0",
     "pino": "10.4.0",

@@ -13,6 +13,12 @@ Chokidar signale les dépôts existants et nouveaux dans `input/`. L’adaptateu
 
 Le cas d’utilisation `processWatchJob` réutilise le port WebP. Le port de stockage publie un dossier par job et archive l’original, ou le conserve dans `failed/` avec un diagnostic. Un échec d’archivage après publication conserve l’original pour inspection. [Prise en charge et transfert](adr/0004-watch-folder.md)
 
+## Détourage local en Phase 3
+
+Le point d’entrée compose le convertisseur Sharp avec le port `BackgroundRemover` quand le détourage est demandé. Sharp oriente et redimensionne l’image, puis transmet une vue RGB de 1024 pixels au plus sur le côté long. Le port retourne un octet d’opacité par pixel de cette vue. Sharp remet le masque aux dimensions du WebP et multiplie ses valeurs par l’alpha de l’original.
+
+L’adaptateur BEN2 charge une session CPU depuis le cache local et la libère à la fin de la commande. Une erreur du modèle suit le traitement d’erreur habituel. Dans un dossier surveillé, l’original et le diagnostic sont conservés dans `failed/`. [Export retenu et fonctionnement hors ligne](adr/0005-local-ben2.md)
+
 ## Responsabilités
 
 | Emplacement cible        | Responsabilité                                                                                                                 |
