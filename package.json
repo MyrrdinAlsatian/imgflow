@@ -15,6 +15,9 @@
     "test:watch": "vitest",
     "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run start"
   },
+  "dependencies": {
+    "sharp": "0.35.5"
+  },
   "devDependencies": {
     "@types/node": "24.19.4",
     "oxfmt": "0.80.0",

@@ -1,6 +1,13 @@
 # Architecture
 
-En Phase 0, le seul module applicatif est `src/main.ts`. Il signale le démarrage puis rend la main. Les limites ci-dessous guident l’arrivée des premiers traitements.
+## Parcours de conversion en Phase 1
+
+1. Le point d’entrée lit les chemins et les options de la commande `process`, puis injecte l’adaptateur Sharp. [Point d’entrée](../src/main.ts)
+2. Le cas d’utilisation vérifie les bornes numériques avant tout accès à l’image. Le port `WebpConverter` reçoit la requête et renvoie les dimensions réelles du WebP publié. Pour tester cette validation isolément, on peut injecter une fonction sans accès au disque. [Contrat de conversion](../src/application/process-image.ts)
+3. L’adaptateur lit les en-têtes pour vérifier le format et le nombre d’images. L’encodage déclenche le décodage des pixels, qui peut encore échouer si l’image est tronquée. Après orientation EXIF, le redimensionnement respecte les deux bornes et peut produire une image plus petite que chacune d’elles. [Adaptateur Sharp](../src/infrastructure/sharp-webp.ts)
+4. Le WebP est encodé dans un dossier temporaire sur le volume de sortie, puis publié sous son nom final. Le dossier temporaire est retiré à la fin du traitement. Une interruption brutale peut le laisser sur disque. [Décision de publication](adr/0003-webp-conversion.md)
+
+## Responsabilités
 
 | Emplacement cible        | Responsabilité                                                                                                                 |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
