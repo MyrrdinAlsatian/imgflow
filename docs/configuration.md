@@ -7,6 +7,8 @@ version: 1
 settings:
   concurrency: 1
   stabilityMs: 2000
+  maxRetries: 3
+  scanIntervalSeconds: 60
   logLevel: info
 pipelines:
   photos:
@@ -48,15 +50,17 @@ pipelines:
 
 ## Réglages
 
-| Champ                                                   | Effet                                                                                                                           |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `version`                                               | Version du schéma. La valeur actuelle est `1`.                                                                                  |
-| `settings.concurrency`                                  | Nombre de jobs simultanés, partagé entre tous les dossiers. Par défaut, `1`. Une seule inférence BEN2 s’exécute à la fois.      |
-| `settings.stabilityMs`                                  | Durée d’observation d’un dépôt, en millisecondes. Par défaut, `2000`.                                                           |
-| `settings.modelCache`                                   | Répertoire contenant les fichiers BEN2, par défaut `./models`. Le modèle est chargé au démarrage dès qu’un pipeline le demande. |
-| `settings.logLevel`                                     | Niveau des journaux. Valeurs acceptées `trace`, `debug`, `info`, `warn`, `error`, `fatal` et `silent`. Par défaut, `info`.      |
-| `settings.maxRetries` et `settings.scanIntervalSeconds` | Valeurs réservées à la Phase 5.                                                                                                 |
-| `pipelines.<id>.processing`                             | Répertoire de prise en charge. Par défaut, `./data/processing/<id>`.                                                            |
+| Champ                          | Effet                                                                                                                                                              |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `version`                      | Version du schéma. La valeur actuelle est `1`.                                                                                                                     |
+| `settings.concurrency`         | Nombre de jobs simultanés, partagé entre tous les dossiers. Par défaut, `1`. Une seule inférence BEN2 s’exécute à la fois.                                         |
+| `settings.stabilityMs`         | Durée d’observation d’un dépôt, en millisecondes. Par défaut, `2000`.                                                                                              |
+| `settings.modelCache`          | Répertoire contenant les fichiers BEN2, par défaut `./models`. Le modèle est chargé au démarrage dès qu’un pipeline le demande.                                    |
+| `settings.logLevel`            | Niveau des journaux. Valeurs acceptées `trace`, `debug`, `info`, `warn`, `error`, `fatal` et `silent`. Par défaut, `info`.                                         |
+| `settings.stateDirectory`      | Répertoire local qui contient `jobs.sqlite` et le verrou du service. Par défaut, `./data/state`. Il doit être disjoint des dossiers de pipeline.                   |
+| `settings.maxRetries`          | Nombre de nouvelles tentatives après le premier essai, par défaut `3`. Avec `0`, le premier échec termine le job. Une tentative interrompue compte dans ce budget. |
+| `settings.scanIntervalSeconds` | Intervalle du scan de réconciliation, en secondes. Valeur par défaut `60`. Un premier scan a lieu au démarrage.                                                    |
+| `pipelines.<id>.processing`    | Répertoire de prise en charge. Par défaut, `./data/processing/<id>`.                                                                                               |
 
 Les identifiants de pipeline et les noms de variante acceptent jusqu’à 64 caractères alphanumériques, tirets ou tirets bas. Ils commencent par un caractère alphanumérique. Les noms réservés sous Windows sont rejetés.
 
@@ -74,4 +78,16 @@ Les étapes sont exécutées dans l’ordre du YAML. `normalize`, lorsqu’elle 
 
 Les variantes héritent des dimensions issues des étapes. Le nom par défaut est `image`. Utiliser des noms distincts pour sortir plusieurs variantes d’un même format, par exemple `hero.webp` et `compact.webp`. JPEG utilise l’extension `.jpg`. WebP, AVIF et JPEG acceptent une qualité de 1 à 100, respectivement 85, 65 et 85 par défaut. PNG accepte un `compressionLevel` de 0 à 9, avec 6 par défaut. JPEG aplatit la transparence sur `background`, blanc par défaut.
 
-Une clé inconnue, une étape mal placée ou une valeur invalide interrompt le démarrage avec le chemin du champ concerné, par exemple `pipelines.photos.steps[1].width`. Si un encodeur échoue, le service retire les variantes temporaires et conserve l’original et son diagnostic dans `failed/`.
+Une clé inconnue, une étape mal placée ou une valeur invalide interrompt le démarrage avec le chemin du champ concerné, par exemple `pipelines.photos.steps[1].width`. Si un encodeur échoue, le service retire les variantes temporaires puis réessaie selon le budget. Lorsque le budget est épuisé, il conserve l’original et son diagnostic dans `failed/`.
+
+Conserver le même répertoire d’état et les mêmes chemins de pipeline tant que des jobs sont en cours. Lors d’une reprise, les nouvelles tentatives utilisent les étapes configurées au redémarrage. Exécuter un seul service par arborescence de données et par répertoire d’état. [Décision de persistance](adr/0007-durable-watch-jobs.md)
+
+## Consulter le journal
+
+Ouvrir `jobs.sqlite` en lecture seule dans un client SQLite. La table `jobs` contient l’état courant, les chemins et le nombre de tentatives. La table `job_attempts` contient le résultat et l’erreur éventuelle de chaque tentative.
+
+```sql
+SELECT id, name, status, attempts, last_error, output_path, result_path
+FROM jobs
+ORDER BY created_at DESC;
+```

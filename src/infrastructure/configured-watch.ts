@@ -39,6 +39,7 @@ export async function runConfiguredWatch(file: string, shutdown: AbortSignal): P
       settings.concurrency,
       pino({ level: settings.logLevel }),
       shutdown,
+      settings,
     );
   } finally {
     await model?.close();

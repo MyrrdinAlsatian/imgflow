@@ -1,14 +1,25 @@
+import { randomUUID } from "node:crypto";
+import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { watch } from "chokidar";
 import PQueue from "p-queue";
 import type { Logger } from "pino";
+import { defaultMaxRetries, defaultScanIntervalSeconds } from "../application/job-journal.ts";
+import type { JobJournal, JobRecord } from "../application/job-journal.ts";
 import { processImage } from "../application/process-image.ts";
 import type { WebpConverter, WebpRequest } from "../application/process-image.ts";
 import { processWatchJob } from "../application/process-watch-job.ts";
 import type { JobRenderer } from "../application/process-watch-job.ts";
-import { openWatchStorage, readFileStamp, sameFile, watchDirectories } from "./watch-files.ts";
+import {
+  fileSignature,
+  openWatchStorage,
+  readFileStamp,
+  sameFile,
+  watchDirectories,
+} from "./watch-files.ts";
 import type { WatchDirectories } from "./watch-files.ts";
+import { openJobJournal } from "./sqlite-journal.ts";
 
 /** Directory and conversion settings shared by all jobs in a watch session. */
 type WatchSettings = Pick<WebpRequest, "width" | "height" | "quality"> & {
@@ -73,6 +84,11 @@ export function runWatchFolder(
     1,
     logger,
     shutdown,
+    {
+      stateDirectory: join(settings.root, "state"),
+      maxRetries: defaultMaxRetries,
+      scanIntervalSeconds: defaultScanIntervalSeconds,
+    },
   );
 }
 
@@ -84,6 +100,12 @@ type WatchPipeline = Readonly<{
   render: JobRenderer;
 }>;
 
+type Reliability = Readonly<{
+  stateDirectory: string;
+  maxRetries: number;
+  scanIntervalSeconds: number;
+}>;
+
 /**
  * Prepares all storage adapters before opening watchers. One queue limits jobs across all inputs.
  *
@@ -91,6 +113,7 @@ type WatchPipeline = Readonly<{
  * @param concurrency - Maximum number of active jobs across the whole service.
  * @param logger - Logger used for lifecycle and job events, scoped by pipeline when an ID is present.
  * @param shutdown - Signal to stop claiming deposits and let in-flight jobs finish.
+ * @param reliability - Journal location, retry budget and periodic scan interval.
  * @returns Resolves after all watchers have closed and job handling has settled.
  * @throws If storage setup fails or a watcher fails. A watcher failure stops the other watchers too.
  */
@@ -99,90 +122,156 @@ export async function runWatchFolders(
   concurrency: number,
   logger: Logger,
   shutdown: AbortSignal,
+  reliability: Reliability,
 ): Promise<void> {
   if (shutdown.aborted) return;
-  const prepared = await Promise.all(
-    pipelines.map(async (pipeline) => ({
-      pipeline,
-      storage: await openWatchStorage(pipeline.directories),
-    })),
-  );
-  if (shutdown.aborted) return;
+  const { journal, close } = await openJobJournal(reliability.stateDirectory);
+  try {
+    journal.assertLayouts(
+      new Map(pipelines.map(({ directories }) => [directories.input, JSON.stringify(directories)])),
+    );
+    const prepared = await Promise.all(
+      pipelines.map(async (pipeline) => ({
+        pipeline,
+        storage: await openWatchStorage(pipeline.directories),
+      })),
+    );
+    if (shutdown.aborted) return;
 
-  const failure = new AbortController();
-  const signal = AbortSignal.any([shutdown, failure.signal]);
-  const queue = new PQueue({ concurrency });
-  await Promise.all(
-    prepared.map(async ({ pipeline, storage }) => {
-      try {
-        const pipelineLogger = pipeline.id ? logger.child({ pipeline: pipeline.id }) : logger;
-        await watchPipeline(pipeline, storage, queue, pipelineLogger, signal, failure);
-      } catch (error) {
-        failure.abort(error);
-      }
-    }),
-  );
-  if (failure.signal.aborted) throw failure.signal.reason;
+    const failure = new AbortController();
+    const signal = AbortSignal.any([shutdown, failure.signal]);
+    const queue = new PQueue({ concurrency });
+    await Promise.all(
+      prepared.map(async ({ pipeline, storage }) => {
+        try {
+          const pipelineLogger = pipeline.id ? logger.child({ pipeline: pipeline.id }) : logger;
+          await watchPipeline(
+            pipeline,
+            storage,
+            queue,
+            pipelineLogger,
+            signal,
+            failure,
+            journal,
+            reliability,
+          );
+        } catch (error) {
+          failure.abort(error);
+        }
+      }),
+    );
+    if (failure.signal.aborted) throw failure.signal.reason;
+  } finally {
+    close();
+  }
 }
 
 async function watchPipeline(
-  { stabilityMs, render }: WatchPipeline,
-  { input, storage, claim }: Awaited<ReturnType<typeof openWatchStorage>>,
+  { directories, stabilityMs, render }: WatchPipeline,
+  { input, storage, claim, claimed, recoverableJobs }: Awaited<ReturnType<typeof openWatchStorage>>,
   queue: PQueue,
   logger: Logger,
   signal: AbortSignal,
   failure: AbortController,
+  journal: JobJournal,
+  { maxRetries, scanIntervalSeconds }: Reliability,
 ): Promise<void> {
-  const tasks = new Map<string, Promise<void>>();
+  const inputs = new Map<string, Promise<void>>();
+  const jobs = new Map<string, Promise<void>>();
   const changed = new Set<string>();
+  const layout = JSON.stringify(directories);
+  const ignored = (path: string) => {
+    const name = basename(path).toLowerCase();
+    return name.startsWith(".") || name.endsWith(".part") || name.endsWith(".tmp");
+  };
   const watcher = watch(input, {
     depth: 0,
     followSymlinks: false,
     atomic: false,
-    ignored(path) {
-      if (path === input) return false;
-      const name = basename(path).toLowerCase();
-      return name.startsWith(".") || name.endsWith(".part") || name.endsWith(".tmp");
-    },
+    ignored: (path) => path !== input && ignored(path),
   });
 
-  async function handle(path: string): Promise<void> {
-    while (!signal.aborted) {
-      const stamp = await waitForStableFile(path, stabilityMs, signal);
-      if (!stamp || signal.aborted) return;
-
-      await queue.add(async () => {
-        if (signal.aborted) return;
-        const job = await claim(path, stamp, signal);
-        if (!job) return;
-        logger.info({ jobId: job.id, name: job.name, originalPath: job.path }, "Image claimed");
-        try {
-          const result = await processWatchJob(job, render, storage);
-          if (result.status === "failed") {
-            logger.warn(
-              { jobId: job.id, failedPath: result.failedPath, err: result.error },
-              "Image failed",
-            );
-          } else {
-            logger.info(
-              {
-                jobId: job.id,
-                output: result.output[0],
-                variants: result.output,
-                archivePath: result.archivePath,
-              },
-              "Image completed",
-            );
-          }
-        } catch (err) {
-          logger.error(
-            { jobId: job.id, originalPath: job.path, err },
-            "Could not finalize image job",
-          );
-        }
-      });
-      // A producer can deposit another file under the same name while this job is running.
+  async function pause(ms: number): Promise<void> {
+    try {
+      await setTimeout(ms, undefined, { signal });
+    } catch (error) {
+      if (!signal.aborted) throw error;
     }
+  }
+
+  async function advance(record: JobRecord): Promise<boolean> {
+    if (signal.aborted) return false;
+    const job = claimed(record);
+    if (record.status === "claiming") {
+      if (!(await claim(record))) {
+        journal.set(record, "cancelled", "The deposit changed before the claim completed.");
+        schedule(join(input, record.name));
+        return false;
+      }
+      journal.set(record, "pending");
+      record = { ...record, status: "pending" };
+      logger.info({ jobId: job.id, name: job.name, originalPath: job.path }, "Image claimed");
+    }
+    const result = await processWatchJob(record, job, render, storage, journal, maxRetries);
+    if (result.status === "retry") {
+      logger.warn(
+        {
+          jobId: job.id,
+          attempt: record.attempts + (record.status === "running" ? 0 : 1),
+          err: result.error,
+          retryAt: result.retryAt,
+        },
+        "Image retry scheduled",
+      );
+      return true;
+    }
+    if (result.status === "failed") {
+      logger.warn(
+        { jobId: job.id, failedPath: result.failedPath, err: result.error },
+        "Image failed",
+      );
+    } else {
+      logger.info(
+        {
+          jobId: job.id,
+          output: result.output[0],
+          variants: result.output,
+          outputPath: result.outputPath,
+          archivePath: result.archivePath,
+        },
+        "Image completed",
+      );
+    }
+    return false;
+  }
+
+  /** Waits for persisted retry deadlines outside the shared job queue. */
+  async function drive(id: string): Promise<void> {
+    while (!signal.aborted) {
+      const record = journal.find(id);
+      if (!record) return;
+      if (record.retryAt && record.retryAt > Date.now()) await pause(record.retryAt - Date.now());
+      if (signal.aborted || !(await queue.add(() => advance(record)))) return;
+    }
+  }
+
+  function scheduleJob(id: string): void {
+    if (signal.aborted || jobs.has(id)) return;
+    const task = drive(id)
+      .catch((err: unknown) => logger.error({ jobId: id, err }, "Could not finalize image job"))
+      .finally(() => jobs.delete(id));
+    jobs.set(id, task);
+  }
+
+  /** Records a stable input before any move. Reuses an outstanding claim for that filename. */
+  async function admit(path: string): Promise<void> {
+    const stamp = await waitForStableFile(path, stabilityMs, signal);
+    if (!stamp || signal.aborted) return;
+    const name = basename(path);
+    const record =
+      journal.claiming(input, name) ??
+      journal.add({ id: randomUUID(), name, scope: input }, layout, fileSignature(stamp));
+    scheduleJob(record.id);
   }
 
   /**
@@ -190,18 +279,40 @@ async function watchPipeline(
    * A final recheck covers a replacement deposited under the same name.
    */
   function schedule(path: string): void {
-    if (signal.aborted) return;
-    if (tasks.has(path)) {
+    if (signal.aborted || ignored(path)) return;
+    if (inputs.has(path)) {
       changed.add(path);
       return;
     }
-    const task = handle(path)
+    const task = admit(path)
       .catch((err: unknown) => logger.error({ path, err }, "Could not claim input file"))
       .finally(() => {
-        tasks.delete(path);
+        inputs.delete(path);
         if (changed.delete(path)) schedule(path);
       });
-    tasks.set(path, task);
+    inputs.set(path, task);
+  }
+
+  /**
+   * Scans at startup and periodically for unfinished jobs, legacy originals in processing
+   * and stable input candidates that filesystem notifications may have missed.
+   */
+  async function reconcile(): Promise<void> {
+    while (!signal.aborted) {
+      try {
+        for (const job of await recoverableJobs()) {
+          if (signal.aborted) return;
+          if (!journal.find(job.id)) journal.add(job, layout, null);
+        }
+        for (const job of journal.unfinished(input)) scheduleJob(job.id);
+        for (const entry of await readdir(input, { withFileTypes: true })) {
+          if (entry.isFile()) schedule(join(input, entry.name));
+        }
+      } catch (err) {
+        logger.error({ input, err }, "Could not reconcile watch folder");
+      }
+      await pause(scanIntervalSeconds * 1000);
+    }
   }
 
   watcher.on("add", schedule);
@@ -212,6 +323,7 @@ async function watchPipeline(
     if (path === input) failure.abort(new Error(`Input directory was removed: "${input}".`));
   });
 
+  const scanning = reconcile();
   await new Promise<void>((resolve) => {
     if (signal.aborted) resolve();
     else signal.addEventListener("abort", () => resolve(), { once: true });
@@ -220,7 +332,7 @@ async function watchPipeline(
   try {
     await watcher.close();
   } finally {
-    await Promise.all(tasks.values());
+    await Promise.all([scanning, ...inputs.values(), ...jobs.values()]);
   }
   logger.info({ input }, "Watch folder stopped");
 }

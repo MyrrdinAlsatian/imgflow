@@ -47,7 +47,9 @@ Déposer les fichiers directement dans `data/input/`. Le service traite un fichi
 | `archive/<id>/<nom>`         | Original d’une conversion réussie.                                                                |
 | `failed/<id>/original/<nom>` | Original dont le traitement a échoué. Le fichier `failed/<id>/error.json` contient le diagnostic. |
 
-Les journaux JSON sur la sortie standard indiquent l’identifiant du job et les chemins utiles. Pour arrêter le service, utiliser Ctrl+C ou envoyer SIGTERM sous Linux. Le traitement engagé se termine et les fichiers encore en attente restent dans `input/`. Après un arrêt brutal ou un échec de déplacement, examiner `processing/` à l’aide des journaux. La reprise des jobs déjà pris en charge est prévue en Phase 5.
+Les journaux JSON sur la sortie standard indiquent l’identifiant du job et les chemins utiles. Pour arrêter le service, utiliser Ctrl+C ou envoyer SIGTERM sous Linux. Le travail en cours se termine et les dépôts en attente restent dans `input/`. Après un arrêt brutal, relancer la même commande avec le même répertoire d’état et les mêmes chemins de données. PixelFlow récupère les jobs dans `processing/` et termine l’archivage des lots déjà publiés.
+
+Par défaut, une conversion échouée peut être relancée trois fois. Chaque tentative, y compris celle interrompue pendant l’encodage, est inscrite dans `data/state/jobs.sqlite`. Les détails d’un job qui a épuisé son budget sont conservés avec l’original dans `failed/`. [Réglages de fiabilité](docs/configuration.md#réglages)
 
 ## Définir plusieurs pipelines en YAML
 

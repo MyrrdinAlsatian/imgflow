@@ -25,6 +25,10 @@ Le chargeur YAML interprète une union discriminée d’étapes avec Valibot et 
 
 Les dossiers partagent une file d’attente. Le port de stockage reçoit toutes les variantes à publier. Il renomme le répertoire temporaire seulement quand l’encodage du lot complet a réussi. [Décision d’architecture](adr/0006-declarative-pipelines.md)
 
+## Journal et reprise en Phase 5
+
+SQLite enregistre la prise en charge avant le déplacement de l’original, puis le début et l’issue de chaque tentative. L’identifiant donne le nom du dossier de travail et du lot final. Au démarrage et pendant le scan périodique, le service retrouve les jobs en cours et confronte le journal aux fichiers. La présence du lot final permet de reprendre l’archivage sans réencoder les variantes. [Décision de persistance](adr/0007-durable-watch-jobs.md)
+
 ## Responsabilités
 
 | Emplacement cible        | Responsabilité                                                                                                                 |
@@ -46,7 +50,7 @@ Une étape appelle un port pour une opération externe. L’adaptateur implémen
 | `/data/output`     | Variantes destinées aux consommateurs.                         |
 | `/data/archive`    | Originaux des traitements réussis.                             |
 | `/data/failed`     | Originaux en échec et informations de diagnostic.              |
-| `/data/state`      | État durable et historique SQLite à partir de la Phase 5.      |
+| `/data/state`      | Journal SQLite des jobs et tentatives, et verrou du service.   |
 | `/models`          | Poids et fichiers de prétraitement disponibles localement.     |
 
 1. Découvrir les candidats au démarrage et lors des événements. Lorsque le producteur le permet, convenir d’un nom temporaire ignoré, suivi d’un renommage final sur le même volume. Pour une copie directe, observer la stabilité sur plusieurs relevés. Un producteur en pause peut donner les mêmes observations qu’une copie terminée.
@@ -54,4 +58,4 @@ Une étape appelle un port pour une opération externe. L’adaptateur implémen
 3. Préparer les variantes dans un espace temporaire du volume de sortie. Vérifier l’ensemble puis publier un répertoire de job par renommage sur ce volume. Les consommateurs lisent uniquement les emplacements publiés.
 4. Archiver l’original après publication. Pour un transfert entre volumes, copier sous un nom temporaire, vérifier la copie complète, la rendre durable et la publier avant de retirer la source. Conserver la source dès qu’une étape échoue. Au redémarrage, un identifiant commun permettra de réconcilier les copies et une publication déjà effectuée.
 
-La Phase 5 ajoutera les tentatives persistées et la réconciliation des fichiers avec SQLite. Un renommage et une transaction SQLite sont deux opérations distinctes. La reprise doit pouvoir vérifier laquelle a abouti.
+Un renommage et une transaction SQLite sont deux opérations distinctes. La reprise vérifie leur résultat à partir de l’identifiant du job et des chemins sur disque.

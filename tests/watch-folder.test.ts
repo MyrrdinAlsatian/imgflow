@@ -179,7 +179,10 @@ test("retains the original and publishes no output when inference fails", async 
       throw new Error("Inference failed");
     }),
   );
-  await vi.waitFor(() => expect(messages.some((line) => line.includes("Image failed"))).toBe(true));
+  await vi.waitFor(
+    () => expect(messages.some((line) => line.includes("Image failed"))).toBe(true),
+    { timeout: 4000 },
+  );
 
   const [job] = await waitForEntries("failed", 1);
   if (!job) throw new Error("Failed job directory is missing.");

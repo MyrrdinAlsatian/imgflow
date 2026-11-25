@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import * as v from "valibot";
 import { parse } from "yaml";
 import { variantFileName } from "../application/image-pipeline.ts";
+import { defaultMaxRetries, defaultScanIntervalSeconds } from "../application/job-journal.ts";
 import type { WatchDirectories } from "./watch-files.ts";
 
 const pathSchema = v.pipe(
@@ -60,12 +61,16 @@ const settings = v.strictObject({
   concurrency: v.optional(positive, 1),
   stabilityMs: v.optional(v.pipe(positive, v.maxValue(2_147_483_647)), 2000),
   modelCache: v.optional(pathSchema, "models"),
+  stateDirectory: v.optional(pathSchema, join("data", "state")),
   logLevel: v.optional(
     v.picklist(["trace", "debug", "info", "warn", "error", "fatal", "silent"]),
     "info",
   ),
-  maxRetries: v.optional(v.pipe(v.number(), v.safeInteger(), v.minValue(0))),
-  scanIntervalSeconds: v.optional(positive),
+  maxRetries: v.optional(v.pipe(v.number(), v.safeInteger(), v.minValue(0)), defaultMaxRetries),
+  scanIntervalSeconds: v.optional(
+    v.pipe(positive, v.maxValue(2_147_483)),
+    defaultScanIntervalSeconds,
+  ),
 });
 
 const schema = v.strictObject({
@@ -143,7 +148,18 @@ export async function loadWatchConfig(file: string) {
       );
     }
 
-    const directoriesSeen: { field: string; path: string }[] = [];
+    const stateDirectory = resolve(base, result.output.settings.stateDirectory);
+    const directoriesSeen = [
+      {
+        field: "settings.stateDirectory",
+        path: await physicalPath(stateDirectory).catch((error: unknown) => {
+          throw new Error(
+            `settings.stateDirectory: ${error instanceof Error ? error.message : String(error)}`,
+            { cause: error },
+          );
+        }),
+      },
+    ];
     const pipelines = [];
     for (const [id, pipeline] of Object.entries(result.output.pipelines)) {
       const prefix = `pipelines.${id}`;
@@ -209,6 +225,7 @@ export async function loadWatchConfig(file: string) {
     return {
       settings: {
         ...result.output.settings,
+        stateDirectory,
         modelCache: resolve(base, result.output.settings.modelCache),
       },
       pipelines,

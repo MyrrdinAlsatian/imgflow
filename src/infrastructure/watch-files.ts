@@ -5,8 +5,8 @@ import {
   copyFile,
   lstat,
   mkdir,
-  mkdtemp,
   open,
+  readdir,
   rename,
   rm,
   rmdir,
@@ -14,7 +14,11 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import type { JobIdentity, JobRecord } from "../application/job-journal.ts";
 import type { ClaimedImage, WatchJobStorage } from "../application/process-watch-job.ts";
+
+const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
+const transfer = /^\.transfer-[0-9a-f-]{36}$/;
 
 function hasCode(error: unknown, code: string): boolean {
   return error instanceof Error && "code" in error && error.code === code;
@@ -45,6 +49,11 @@ export function sameFile(left: BigIntStats, right: BigIntStats | undefined): boo
     left.mtimeNs === right.mtimeNs &&
     left.ctimeNs === right.ctimeNs
   );
+}
+
+/** Serializes file identity, size and nanosecond timestamps for a durable claim. */
+export function fileSignature(stamp: BigIntStats): string {
+  return [stamp.dev, stamp.ino, stamp.size, stamp.mtimeNs, stamp.ctimeNs].join(":");
 }
 
 async function digest(path: string): Promise<string> {
@@ -156,22 +165,101 @@ export async function openWatchStorage({
     }
   }
 
+  function claimed(job: JobIdentity): ClaimedImage {
+    if (
+      !uuid.test(job.id) ||
+      !job.name ||
+      job.name !== basename(job.name) ||
+      job.name === "." ||
+      job.name === ".."
+    ) {
+      throw new Error(`Invalid recorded job paths for "${job.id}".`);
+    }
+    return { id: job.id, name: job.name, path: join(processing, job.id, job.name) };
+  }
+
+  async function entries(path: string) {
+    try {
+      return await readdir(path, { withFileTypes: true });
+    } catch (error) {
+      if (hasCode(error, "ENOENT")) return [];
+      throw error;
+    }
+  }
+
+  /**
+   * Finishes an interrupted cross-volume move by verifying both copies and rechecking the
+   * source observation before unlinking it. A changed or different source is kept.
+   */
+  async function removeDuplicate(source: string, destination: string, stamp: BigIntStats) {
+    if (
+      (await digest(source)) !== (await digest(destination)) ||
+      !sameFile(stamp, await readFileStamp(source))
+    ) {
+      throw new Error(
+        `Different originals at "${source}" and "${destination}". Both were retained.`,
+      );
+    }
+    await unlink(source);
+  }
+
+  async function cleanTransfers(directory: string) {
+    for (const entry of await entries(directory)) {
+      if (entry.isFile() && transfer.test(entry.name)) await unlink(join(directory, entry.name));
+    }
+  }
+
   async function retain(job: ClaimedImage, destination: string): Promise<string> {
     const stamp = await readFileStamp(job.path);
-    if (!stamp || !(await moveOriginal(job.path, destination, stamp))) {
+    if (await readFileStamp(destination)) {
+      if (stamp) await removeDuplicate(job.path, destination, stamp);
+    } else if (!stamp || !(await moveOriginal(job.path, destination, stamp))) {
       throw new Error(`Claimed original changed or disappeared: "${job.path}".`);
     }
-    await rmdir(dirname(job.path));
+    const directory = dirname(job.path);
+    await cleanTransfers(directory);
+    await rmdir(directory).catch((error: unknown) => {
+      if (!hasCode(error, "ENOENT") && !hasCode(error, "ENOTEMPTY")) throw error;
+    });
     return destination;
   }
 
+  const stagingPath = (id: string) => join(output, `.pixelflow-${id}`);
+
   const storage: WatchJobStorage = {
+    async published(job) {
+      const path = join(output, job.id);
+      try {
+        if (
+          !(await lstat(path)).isDirectory() ||
+          !(await entries(path)).some((entry) => entry.isFile())
+        ) {
+          throw new Error(`Published batch is not a populated directory: "${path}".`);
+        }
+        return path;
+      } catch (error) {
+        if (hasCode(error, "ENOENT")) return undefined;
+        throw error;
+      }
+    },
+    async failed(job) {
+      const path = join(failed, job.id, "original", job.name);
+      return (await readFileStamp(path)) ? path : undefined;
+    },
+    async discardStaging(job) {
+      await rm(stagingPath(job.id), { recursive: true, force: true });
+    },
     async publish(job, render) {
-      const staging = await mkdtemp(join(output, ".pixelflow-"));
+      const staging = stagingPath(job.id);
+      await mkdir(staging);
       const destination = join(output, job.id);
       try {
         const files = await render(job.path, staging);
+        if (!files.length) throw new Error("The renderer produced no variants.");
+        for (const file of files) await syncPath(join(staging, file.name), "r+");
+        if (process.platform !== "win32") await syncPath(staging, "r");
         await rename(staging, destination);
+        if (process.platform !== "win32") await syncPath(output, "r");
         return files.map(({ name, dimensions }) => ({ path: join(destination, name), dimensions }));
       } finally {
         await rm(staging, { recursive: true, force: true });
@@ -179,22 +267,21 @@ export async function openWatchStorage({
     },
     async archive(job) {
       const destination = join(archive, job.id);
-      await mkdir(destination);
+      await mkdir(destination, { recursive: true });
       return retain(job, join(destination, job.name));
     },
     async fail(job, error) {
       const directory = join(failed, job.id);
       const original = join(directory, "original");
-      await mkdir(directory);
-      await mkdir(original);
+      await mkdir(original, { recursive: true });
       const details = {
         jobId: job.id,
         name: job.name,
         message: error instanceof Error ? error.message : String(error),
       };
-      await writeFile(join(directory, "error.json"), JSON.stringify(details, null, 2) + "\n", {
-        flag: "wx",
-      });
+      const temporary = join(directory, ".error.json.tmp");
+      await writeFile(temporary, JSON.stringify(details, null, 2) + "\n");
+      await rename(temporary, join(directory, "error.json"));
       return retain(job, join(original, job.name));
     },
   };
@@ -202,27 +289,44 @@ export async function openWatchStorage({
   return {
     input,
     storage,
-    /**
-     * Claims an unchanged deposit under a unique job identifier in the processing directory.
-     * A move already in progress is allowed to finish during shutdown.
-     *
-     * @returns The claimed original, or undefined if the move was skipped or the deposit changed.
-     */
-    async claim(
-      path: string,
-      expected: BigIntStats,
-      signal: AbortSignal,
-    ): Promise<ClaimedImage | undefined> {
-      const id = randomUUID();
-      const directory = join(processing, id);
-      const name = basename(path);
-      const destination = join(directory, name);
-      await mkdir(directory);
-      if (signal.aborted || !(await moveOriginal(path, destination, expected))) {
-        await rmdir(directory);
-        return undefined;
+    claimed,
+    /** Finds work written by a version that predated the journal. */
+    async recoverableJobs() {
+      const jobs: JobIdentity[] = [];
+      for (const directory of await entries(processing)) {
+        if (!directory.isDirectory() || !uuid.test(directory.name)) continue;
+        const originals = (await entries(join(processing, directory.name))).filter(
+          (entry) => entry.isFile() && !transfer.test(entry.name),
+        );
+        const [original] = originals;
+        if (originals.length === 1 && original) {
+          jobs.push({ id: directory.name, name: original.name, scope: input });
+        }
       }
-      return { id, name, path: destination };
+      return jobs;
+    },
+    /**
+     * Completes a recorded claim. The source stays in input if its recorded identity changed.
+     * A verified duplicate left by an interrupted cross-device move is removed from input.
+     *
+     * @returns True once the original is in processing, or false if the claim can no longer be made.
+     * @throws If the original cannot be moved or a suspected duplicate cannot be verified.
+     */
+    async claim(record: JobRecord): Promise<boolean> {
+      const job = claimed(record);
+      const source = join(input, job.name);
+      const stamp = await readFileStamp(source);
+      const matches = stamp && fileSignature(stamp) === record.signature;
+      if (await readFileStamp(job.path)) {
+        if (matches) await removeDuplicate(source, job.path, stamp);
+        await cleanTransfers(dirname(job.path));
+        return true;
+      }
+      if (!matches) return false;
+      await mkdir(dirname(job.path), { recursive: true });
+      if (!(await moveOriginal(source, job.path, stamp))) return false;
+      await cleanTransfers(dirname(job.path));
+      return true;
     },
   };
 }

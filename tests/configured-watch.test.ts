@@ -238,6 +238,7 @@ test("cleans the whole staging batch when the second encoder fails", async () =>
     1,
     pino({ level: "silent" }),
     shutdown.signal,
+    { stateDirectory: join(root, "state"), maxRetries: 0, scanIntervalSeconds: 60 },
   );
 
   await vi.waitFor(
