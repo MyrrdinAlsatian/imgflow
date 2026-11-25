@@ -1,0 +1,5 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "endOfLine": "lf",
+  "ignorePatterns": ["dist/**", "coverage/**", "data/**", "models/**", "pnpm-lock.yaml"]
+}

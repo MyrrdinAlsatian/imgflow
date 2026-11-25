@@ -1,0 +1,9 @@
+# ADR 0002 · Frontières des dépendances
+
+**Décision adoptée en Phase 0.** Les règles métier expriment les invariants de l’original, du job et de ses sorties. Les cas d’utilisation pilotent le traitement via les ports dont ils ont besoin. Les adaptateurs encapsulent les bibliothèques et les ressources externes. Le point d’entrée compose les implémentations.
+
+Créer une étape quand son comportement peut être nommé et testé. Le registre prévu en Phase 4 reliera des options validées par Valibot à ces étapes. Les types externes de Sharp, Chokidar, Transformers.js ou SQLite restent dans leurs adaptateurs. Cette limite permet aux tests ordinaires d’injecter un double et d’exercer un échec sans télécharger de modèle.
+
+Le détourage illustre cette décision. La fiche de BEN2 décrit une pipeline Transformers.js. L’export ONNX consulté fournit un graphe FP16 d’environ 219 Mo et le binding Node d’ONNX Runtime propose un backend CPU. Ces éléments justifient un essai. La compatibilité effective du graphe, la qualité et le coût mémoire restent à mesurer sur le CPU Linux cible. Le SDK RunOnWeb ne fait pas partie du chemin serveur prévu. [Fiche BEN2](https://huggingface.co/onnx-community/BEN2-ONNX) · [Graphe ONNX](https://huggingface.co/onnx-community/BEN2-ONNX/tree/main/onnx) · [Binding Node](https://onnxruntime.ai/docs/get-started/with-javascript/node.html)
+
+En Phase 3, charger la révision choisie depuis `/models` en interdisant le chargement distant, relever les versions exactes de Transformers.js et de son runtime ONNX, puis appliquer le [protocole de benchmark](../benchmarks.md). Vérifier séparément les licences du code amont et de l’export des poids à cette révision. [Chargement local](https://huggingface.co/docs/transformers.js/main/tutorials/node) · [Licence du dépôt BEN2](https://github.com/PramaLLC/BEN2/blob/main/LICENSE)
