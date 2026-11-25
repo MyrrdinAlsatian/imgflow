@@ -1,44 +1,77 @@
-# Configuration YAML cible
+# Configuration YAML
 
-La lecture de ce format est prévue en Phase 4. En Phase 3, la ligne de commande active le détourage avec `--remove-background` et sélectionne le cache avec `--model-cache`.
+Enregistrer cet exemple dans `pixelflow.yaml`, puis exécuter `node dist/main.js watch --config ./pixelflow.yaml`. Les chemins relatifs partent du répertoire de ce fichier. Les cinq dossiers d’un pipeline et ceux des autres pipelines doivent être disjoints. Le service crée les dossiers manquants après avoir validé toute la configuration.
 
 ```yaml
 version: 1
 settings:
   concurrency: 1
-  maxRetries: 3
-  scanIntervalSeconds: 60
-  modelCache: /models
+  stabilityMs: 2000
   logLevel: info
 pipelines:
-  portraits:
-    watch: /data/input/portraits
-    output: /data/output/portraits
-    archive: /data/archive/portraits
-    failed: /data/failed/portraits
+  photos:
+    watch: ./data/input/photos
+    output: ./data/output/photos
+    archive: ./data/archive/photos
+    failed: ./data/failed/photos
     steps:
       - type: normalize
-      - type: remove-background
-        model: ben2
+      - type: resize
+        width: 1200
+        height: 800
+        fit: inside
+      - type: export
+        variants:
+          - format: webp
+          - format: avif
+            quality: 65
+          - format: jpeg
+            name: preview
+            background: "#ffffff"
+  icons:
+    watch: ./data/input/icons
+    output: ./data/output/icons
+    archive: ./data/archive/icons
+    failed: ./data/failed/icons
+    steps:
       - type: trim
         padding: 0.05
       - type: resize
-        width: 800
-        height: 800
+        width: 256
+        height: 256
         fit: contain
         background: transparent
       - type: export
         variants:
-          - format: webp
-            quality: 85
-          - format: avif
-            quality: 65
+          - format: png
 ```
 
-## Lecture et validation prévues
+## Réglages
 
-- `version` sélectionne le schéma. `settings` regroupe la limite de jobs simultanés, les nouvelles tentatives après le premier essai, la période de réconciliation en secondes, le répertoire des modèles et le niveau de log. La reprise persistante et le scan périodique relèvent de la Phase 5.
-- Chaque clé de `pipelines` identifie une pipeline. Les chemins d’entrée et de destination doivent permettre d’exclure toute réingestion des sorties, archives, échecs et fichiers temporaires.
-- `steps` est une séquence ordonnée. Valibot validera une union discriminée par `type` avant la construction des étapes. La normalisation corrige l’orientation, le détourage produit une transparence, le recadrage utilise une marge relative et le redimensionnement définit les dimensions finales.
-- L’export terminal déclare les variantes. Les formats cibles sont WebP, AVIF, PNG et JPEG. La qualité dépend de l’encodeur. Pour JPEG, une couleur de fond opaque devra être définie si le résultat intermédiaire contient de la transparence.
-- Valider l’ensemble au démarrage avant de prendre possession d’un fichier. Une version inconnue, une étape indisponible ou une dimension invalide doit faire échouer le démarrage avec le chemin du champ concerné, par exemple `pipelines.portraits.steps[3].width`.
+| Champ                                                   | Effet                                                                                                                           |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `version`                                               | Version du schéma. La valeur actuelle est `1`.                                                                                  |
+| `settings.concurrency`                                  | Nombre de jobs simultanés, partagé entre tous les dossiers. Par défaut, `1`. Une seule inférence BEN2 s’exécute à la fois.      |
+| `settings.stabilityMs`                                  | Durée d’observation d’un dépôt, en millisecondes. Par défaut, `2000`.                                                           |
+| `settings.modelCache`                                   | Répertoire contenant les fichiers BEN2, par défaut `./models`. Le modèle est chargé au démarrage dès qu’un pipeline le demande. |
+| `settings.logLevel`                                     | Niveau des journaux. Valeurs acceptées `trace`, `debug`, `info`, `warn`, `error`, `fatal` et `silent`. Par défaut, `info`.      |
+| `settings.maxRetries` et `settings.scanIntervalSeconds` | Valeurs réservées à la Phase 5.                                                                                                 |
+| `pipelines.<id>.processing`                             | Répertoire de prise en charge. Par défaut, `./data/processing/<id>`.                                                            |
+
+Les identifiants de pipeline et les noms de variante acceptent jusqu’à 64 caractères alphanumériques, tirets ou tirets bas. Ils commencent par un caractère alphanumérique. Les noms réservés sous Windows sont rejetés.
+
+## Étapes
+
+Les étapes sont exécutées dans l’ordre du YAML. `normalize`, lorsqu’elle est présente, vient en premier. Chaque pipeline se termine par un seul `export`.
+
+| Étape               | Comportement                                                                                                                                                                                                                                                                                                                                       |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `normalize`         | Applique l’orientation EXIF. Les encodeurs retirent les métadonnées de la source.                                                                                                                                                                                                                                                                  |
+| `remove-background` | Combine le masque du premier plan avec l’alpha existant. Indiquer `model: ben2` et préparer le cache avant de démarrer. [Préparation de BEN2](../README.md#détourer-une-image-avec-ben2)                                                                                                                                                           |
+| `trim`              | Recadre autour des pixels dont l’alpha atteint 16 sur 255. `padding` ajoute une marge relative de 0 à 1 sur chaque côté, dans les limites de l’image. La valeur par défaut est 0. Une image entièrement transparente conserve ses dimensions.                                                                                                      |
+| `resize`            | `width` et `height` vont de 1 à 16 383. Avec `inside` (par défaut), l’image tient dans ces limites sans agrandissement. `contain` complète le cadre et `cover` recadre pour remplir les dimensions exactes. Ces deux modes acceptent jusqu’à 64 millions de pixels. La couleur de fond de `contain` vaut `transparent` ou une couleur `"#RRGGBB"`. |
+| `export`            | Encode toutes les variantes dans un répertoire temporaire avant de publier le lot sous `output/<id-de-job>/`.                                                                                                                                                                                                                                      |
+
+Les variantes héritent des dimensions issues des étapes. Le nom par défaut est `image`. Utiliser des noms distincts pour sortir plusieurs variantes d’un même format, par exemple `hero.webp` et `compact.webp`. JPEG utilise l’extension `.jpg`. WebP, AVIF et JPEG acceptent une qualité de 1 à 100, respectivement 85, 65 et 85 par défaut. PNG accepte un `compressionLevel` de 0 à 9, avec 6 par défaut. JPEG aplatit la transparence sur `background`, blanc par défaut.
+
+Une clé inconnue, une étape mal placée ou une valeur invalide interrompt le démarrage avec le chemin du champ concerné, par exemple `pipelines.photos.steps[1].width`. Si un encodeur échoue, le service retire les variantes temporaires et conserve l’original et son diagnostic dans `failed/`.

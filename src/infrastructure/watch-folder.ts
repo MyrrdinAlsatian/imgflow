@@ -1,11 +1,14 @@
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { watch } from "chokidar";
 import PQueue from "p-queue";
 import type { Logger } from "pino";
+import { processImage } from "../application/process-image.ts";
 import type { WebpConverter, WebpRequest } from "../application/process-image.ts";
 import { processWatchJob } from "../application/process-watch-job.ts";
-import { openWatchStorage, readFileStamp, sameFile } from "./watch-files.ts";
+import type { JobRenderer } from "../application/process-watch-job.ts";
+import { openWatchStorage, readFileStamp, sameFile, watchDirectories } from "./watch-files.ts";
+import type { WatchDirectories } from "./watch-files.ts";
 
 /** Directory and conversion settings shared by all jobs in a watch session. */
 type WatchSettings = Pick<WebpRequest, "width" | "height" | "quality"> & {
@@ -47,18 +50,79 @@ async function waitForStableFile(path: string, delay: number, signal: AbortSigna
  * @returns Resolves after shutdown. Pending deposits remain in input for the next startup scan.
  * @throws If storage initialization or the watcher fails. A watcher failure drains the active job first.
  */
-export async function runWatchFolder(
+export function runWatchFolder(
   settings: WatchSettings,
   convert: WebpConverter,
   logger: Logger,
   shutdown: AbortSignal,
 ): Promise<void> {
-  const { input, storage, claim } = await openWatchStorage(settings.root);
+  const render: JobRenderer = async (inputPath, staging) => {
+    const name = "image.webp";
+    const outputPath = join(staging, name);
+    const dimensions = await processImage({ ...settings, inputPath, outputPath }, convert);
+    return [{ name, dimensions }];
+  };
+  return runWatchFolders(
+    [
+      {
+        directories: watchDirectories(settings.root),
+        stabilityMs: settings.stabilityMs,
+        render,
+      },
+    ],
+    1,
+    logger,
+    shutdown,
+  );
+}
+
+type WatchPipeline = Readonly<{
+  id?: string;
+  directories: WatchDirectories;
+  stabilityMs: number;
+  render: JobRenderer;
+}>;
+
+/** Prepares all folders, then watches them with a shared job queue and shutdown signal. */
+export async function runWatchFolders(
+  pipelines: readonly WatchPipeline[],
+  concurrency: number,
+  logger: Logger,
+  shutdown: AbortSignal,
+): Promise<void> {
+  if (shutdown.aborted) return;
+  const prepared = await Promise.all(
+    pipelines.map(async (pipeline) => ({
+      pipeline,
+      storage: await openWatchStorage(pipeline.directories),
+    })),
+  );
   if (shutdown.aborted) return;
 
   const failure = new AbortController();
   const signal = AbortSignal.any([shutdown, failure.signal]);
-  const queue = new PQueue({ concurrency: 1 });
+  const queue = new PQueue({ concurrency });
+  await Promise.all(
+    prepared.map(async ({ pipeline, storage }) => {
+      try {
+        const pipelineLogger = pipeline.id ? logger.child({ pipeline: pipeline.id }) : logger;
+        await watchPipeline(pipeline, storage, queue, pipelineLogger, signal, failure);
+      } catch (error) {
+        failure.abort(error);
+      }
+    }),
+  );
+  if (failure.signal.aborted) throw failure.signal.reason;
+}
+
+async function watchPipeline(
+  { stabilityMs, render }: WatchPipeline,
+  { input, storage, claim }: Awaited<ReturnType<typeof openWatchStorage>>,
+  queue: PQueue,
+  logger: Logger,
+  signal: AbortSignal,
+  failure: AbortController,
+): Promise<void> {
   const tasks = new Map<string, Promise<void>>();
   const changed = new Set<string>();
   const watcher = watch(input, {
@@ -74,7 +138,7 @@ export async function runWatchFolder(
 
   async function handle(path: string): Promise<void> {
     while (!signal.aborted) {
-      const stamp = await waitForStableFile(path, settings.stabilityMs, signal);
+      const stamp = await waitForStableFile(path, stabilityMs, signal);
       if (!stamp || signal.aborted) return;
 
       await queue.add(async () => {
@@ -83,7 +147,7 @@ export async function runWatchFolder(
         if (!job) return;
         logger.info({ jobId: job.id, name: job.name, originalPath: job.path }, "Image claimed");
         try {
-          const result = await processWatchJob(job, settings, convert, storage);
+          const result = await processWatchJob(job, render, storage);
           if (result.status === "failed") {
             logger.warn(
               { jobId: job.id, failedPath: result.failedPath, err: result.error },
@@ -91,7 +155,12 @@ export async function runWatchFolder(
             );
           } else {
             logger.info(
-              { jobId: job.id, output: result.output, archivePath: result.archivePath },
+              {
+                jobId: job.id,
+                output: result.output[0],
+                variants: result.output,
+                archivePath: result.archivePath,
+              },
               "Image completed",
             );
           }
@@ -143,6 +212,5 @@ export async function runWatchFolder(
   } finally {
     await Promise.all(tasks.values());
   }
-  if (failure.signal.aborted) throw failure.signal.reason;
   logger.info({ input }, "Watch folder stopped");
 }

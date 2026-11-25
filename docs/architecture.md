@@ -19,6 +19,12 @@ Le point d’entrée compose le convertisseur Sharp avec le port `BackgroundRemo
 
 L’adaptateur BEN2 charge une session CPU depuis le cache local et la libère à la fin de la commande. Une erreur du modèle suit le traitement d’erreur habituel. Dans un dossier surveillé, l’original et le diagnostic sont conservés dans `failed/`. [Export retenu et fonctionnement hors ligne](adr/0005-local-ben2.md)
 
+## Pipelines déclaratives en Phase 4
+
+Le chargeur YAML interprète une union discriminée d’étapes avec Valibot et vérifie les chemins avant de lancer les dossiers surveillés. Les types de pipeline sont indépendants des bibliothèques. L’adaptateur Sharp associe chaque transformation à une fonction dans un registre typé. Il termine chaque opération avant d’entamer la suivante pour respecter l’ordre du YAML.
+
+Les dossiers partagent une file d’attente. Le port de stockage reçoit toutes les variantes à publier. Il renomme le répertoire temporaire seulement quand l’encodage du lot complet a réussi. [Décision d’architecture](adr/0006-declarative-pipelines.md)
+
 ## Responsabilités
 
 | Emplacement cible        | Responsabilité                                                                                                                 |

@@ -49,6 +49,16 @@ Déposer les fichiers directement dans `data/input/`. Le service traite un fichi
 
 Les journaux JSON sur la sortie standard indiquent l’identifiant du job et les chemins utiles. Pour arrêter le service, utiliser Ctrl+C ou envoyer SIGTERM sous Linux. Le traitement engagé se termine et les fichiers encore en attente restent dans `input/`. Après un arrêt brutal ou un échec de déplacement, examiner `processing/` à l’aide des journaux. La reprise des jobs déjà pris en charge est prévue en Phase 5.
 
+## Définir plusieurs pipelines en YAML
+
+Enregistrer l’[exemple YAML](docs/configuration.md) dans `pixelflow.yaml` puis lancer le service.
+
+```sh
+node dist/main.js watch --config ./pixelflow.yaml
+```
+
+Chaque dossier d’entrée applique ses propres étapes et peut publier des variantes WebP, AVIF, PNG et JPEG. Les chemins relatifs partent du répertoire du fichier YAML. Chaque lot apparaît dans le dossier de sortie une fois toutes ses variantes encodées. Une erreur dans le YAML indique le champ concerné avant le démarrage des dossiers surveillés.
+
 ## Détourer une image avec BEN2
 
 Préparer le cache une fois sur une machine connectée. Cette commande télécharge l’export BEN2 FP16 épinglé (219 Mo) et vérifie la somme SHA-256 de chaque fichier. On peut ensuite copier le dossier `models/ben2/` sur une autre machine.

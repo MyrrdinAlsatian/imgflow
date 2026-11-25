@@ -112,21 +112,35 @@ export async function moveOriginal(
   }
 }
 
-/**
- * Creates the input, processing, output, archive and failed directories under the data root.
- *
- * @param root - Data directory. Relative paths are resolved against the current working directory.
- * @returns The input path, the storage port implementation and the operation that claims a deposit.
- * @throws If the directories cannot be created or a managed path is not an ordinary directory.
- */
-export async function openWatchStorage(root: string) {
-  root = resolve(root);
-  const input = join(root, "input");
-  const processing = join(root, "processing");
-  const output = join(root, "output");
-  const archive = join(root, "archive");
-  const failed = join(root, "failed");
-  for (const directory of [root, input, processing, output, archive, failed]) {
+export type WatchDirectories = Readonly<{
+  input: string;
+  processing: string;
+  output: string;
+  archive: string;
+  failed: string;
+}>;
+
+/** Directory layout used by the single-folder CLI. */
+export function watchDirectories(root: string): WatchDirectories {
+  const base = resolve(root);
+  return {
+    input: join(base, "input"),
+    processing: join(base, "processing"),
+    output: join(base, "output"),
+    archive: join(base, "archive"),
+    failed: join(base, "failed"),
+  };
+}
+
+/** Opens the storage adapter and creates the directories before the watcher can claim files. */
+export async function openWatchStorage({
+  input,
+  processing,
+  output,
+  archive,
+  failed,
+}: WatchDirectories) {
+  for (const directory of [input, processing, output, archive, failed]) {
     await mkdir(directory, { recursive: true });
     if (!(await lstat(directory)).isDirectory()) {
       throw new Error(`Expected a directory at "${directory}".`);
@@ -147,9 +161,9 @@ export async function openWatchStorage(root: string) {
       const staging = await mkdtemp(join(output, ".pixelflow-"));
       const destination = join(output, job.id);
       try {
-        const dimensions = await render(join(staging, "image.webp"));
+        const files = await render(job.path, staging);
         await rename(staging, destination);
-        return { path: join(destination, "image.webp"), dimensions };
+        return files.map(({ name, dimensions }) => ({ path: join(destination, name), dimensions }));
       } finally {
         await rm(staging, { recursive: true, force: true });
       }

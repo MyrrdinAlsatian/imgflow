@@ -1,5 +1,4 @@
-import { processImage } from "./process-image.ts";
-import type { ImageDimensions, WebpConverter, WebpRequest } from "./process-image.ts";
+import type { ImageDimensions } from "./process-image.ts";
 
 /** An original in the service's processing directory. */
 export type ClaimedImage = Readonly<{
@@ -11,16 +10,21 @@ export type ClaimedImage = Readonly<{
   path: string;
 }>;
 
+/** A completed file in a private staging directory. The name is a single path component. */
+export type RenderedVariant = Readonly<{ name: string; dimensions: ImageDimensions }>;
+
+/** Renders all variants into the provided directory, or rejects before any are published. */
+export type JobRenderer = (
+  original: string,
+  stagingDirectory: string,
+) => Promise<readonly RenderedVariant[]>;
+
+type PublishedVariant = Readonly<{ path: string; dimensions: ImageDimensions }>;
+
 /** Storage operations for a job whose original has already been claimed. */
 export type WatchJobStorage = Readonly<{
-  /** Renders to a staging path and returns the final path and dimensions after publication. */
-  publish(
-    job: ClaimedImage,
-    render: (path: string) => Promise<ImageDimensions>,
-  ): Promise<{
-    path: string;
-    dimensions: ImageDimensions;
-  }>;
+  /** Stages a complete batch and returns final paths after its publication. */
+  publish(job: ClaimedImage, render: JobRenderer): Promise<readonly PublishedVariant[]>;
   /** Moves the original after publication and returns its archive path. */
   archive(job: ClaimedImage): Promise<string>;
   /** Retains the original and writes a diagnostic, then returns the retained original's path. */
@@ -28,12 +32,11 @@ export type WatchJobStorage = Readonly<{
 }>;
 
 /**
- * Publishes a WebP and archives the original. A conversion or publication error is recorded with
+ * Publishes a batch of variants and archives the original. A render or publication error is recorded with
  * the retained original. An archive error after publication propagates to the watcher.
  *
  * @param job - Original claimed from input.
- * @param settings - Resize bounds and WebP quality.
- * @param convert - Image conversion adapter.
+ * @param render - Adapter that renders the variants for the configured pipeline.
  * @param storage - Port for output publication and original retention.
  * @returns A completed result with the output and archive paths, or a failed result with the
  * retained original's path and the error that prevented publication.
@@ -41,15 +44,12 @@ export type WatchJobStorage = Readonly<{
  */
 export async function processWatchJob(
   job: ClaimedImage,
-  settings: Pick<WebpRequest, "width" | "height" | "quality">,
-  convert: WebpConverter,
+  render: JobRenderer,
   storage: WatchJobStorage,
 ) {
   let output: Awaited<ReturnType<WatchJobStorage["publish"]>>;
   try {
-    output = await storage.publish(job, (outputPath) =>
-      processImage({ ...settings, inputPath: job.path, outputPath }, convert),
-    );
+    output = await storage.publish(job, render);
   } catch (error) {
     const failedPath = await storage.fail(job, error);
     return { status: "failed", failedPath, error } as const;
