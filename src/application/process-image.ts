@@ -33,14 +33,21 @@ export async function processImage(
   request: WebpRequest,
   convert: WebpConverter,
 ): Promise<ImageDimensions> {
+  validateWebpSettings(request);
+  return convert(request);
+}
+
+/** Checks the numerical options shared by single conversions and watch folders. */
+export function validateWebpSettings(
+  settings: Pick<WebpRequest, "width" | "height" | "quality">,
+): void {
   for (const [name, value, max] of [
-    ["width", request.width, 16_383],
-    ["height", request.height, 16_383],
-    ["quality", request.quality, 100],
+    ["width", settings.width, 16_383],
+    ["height", settings.height, 16_383],
+    ["quality", settings.quality, 100],
   ] as const) {
     if (!Number.isInteger(value) || value < 1 || value > max) {
       throw new Error(`${name} must be an integer from 1 to ${max}.`);
     }
   }
-  return convert(request);
 }

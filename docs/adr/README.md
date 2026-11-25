@@ -13,6 +13,7 @@ préférence qui ne contraint pas la suite du projet.
 - [ADR 0001 · Runtime et outillage](0001-runtime-and-tooling.md)
 - [ADR 0002 · Frontières des dépendances](0002-dependency-boundaries.md)
 - [ADR 0003 · Conversion WebP et publication](0003-webp-conversion.md)
+- [ADR 0004 · Prise en charge dans un dossier surveillé](0004-watch-folder.md)
 
 ## Format
 

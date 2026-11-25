@@ -2,7 +2,7 @@
 
 PixelFlow est un projet de moteur de traitement d’images auto-hébergé. À terme, déposer une image dans un dossier déclenchera une suite d’opérations locales et la publication de variantes pour le web.
 
-**La Phase 1 permet de convertir une image locale en WebP.** La surveillance des dossiers arrive en Phase 2.
+**PixelFlow convertit une image locale en WebP ou traite automatiquement les dépôts d’un dossier surveillé.**
 
 ## Installer et lancer
 
@@ -29,6 +29,25 @@ Après l’installation des dépendances et la compilation, `node dist/main.js p
 | `Output already exists`                             | Choisir un autre chemin de sortie. Le fichier déjà présent est conservé.                                                         |
 | `Could not read image` ou `Could not convert image` | Lire le détail qui suit le message. Vérifier que l’image est complète et que le répertoire de sortie est accessible en écriture. |
 | `Input must be a single-frame JPEG, PNG or WebP`    | Fournir une image fixe dans un des formats acceptés. La commande se base sur le contenu du fichier.                              |
+
+## Surveiller un dossier
+
+Après la compilation, lancer PixelFlow avec un répertoire de données. Par défaut, la commande utilise `./data`.
+
+```sh
+node dist/main.js watch ./data --width 1200 --height 800 --quality 85 --stability-ms 2000
+```
+
+Déposer les fichiers directement dans `data/input/`. Le service traite un fichier à la fois, y compris ceux présents au démarrage. Pour une copie longue, écrire sous un nom terminé par `.part` ou `.tmp` dans `input/`, puis renommer le fichier une fois la copie terminée. PixelFlow ignore les noms commençant par un point, les liens symboliques et le contenu des sous-dossiers. Pour un dépôt direct, PixelFlow attend une période sans changement observable. Une copie interrompue plus longtemps que cette période peut être prise en charge avant sa fin.
+
+| Chemin                       | Contenu                                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------------------------- |
+| `processing/<id>/<nom>`      | Original pris en charge par le service.                                                           |
+| `output/<id>/image.webp`     | WebP complet publié par PixelFlow.                                                                |
+| `archive/<id>/<nom>`         | Original d’une conversion réussie.                                                                |
+| `failed/<id>/original/<nom>` | Original dont le traitement a échoué. Le fichier `failed/<id>/error.json` contient le diagnostic. |
+
+Les journaux JSON sur la sortie standard indiquent l’identifiant du job et les chemins utiles. Pour arrêter le service, utiliser Ctrl+C ou envoyer SIGTERM sous Linux. Le traitement engagé se termine et les fichiers encore en attente restent dans `input/`. Après un arrêt brutal ou un échec de déplacement, examiner `processing/` à l’aide des journaux. La reprise des jobs déjà pris en charge est prévue en Phase 5.
 
 ## Commandes de développement
 

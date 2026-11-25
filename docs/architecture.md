@@ -7,6 +7,12 @@
 3. L’adaptateur lit les en-têtes pour vérifier le format et le nombre d’images. L’encodage déclenche le décodage des pixels, qui peut encore échouer si l’image est tronquée. Après orientation EXIF, le redimensionnement respecte les deux bornes et peut produire une image plus petite que chacune d’elles. [Adaptateur Sharp](../src/infrastructure/sharp-webp.ts)
 4. Le WebP est encodé dans un dossier temporaire sur le volume de sortie, puis publié sous son nom final. Le dossier temporaire est retiré à la fin du traitement. Une interruption brutale peut le laisser sur disque. [Décision de publication](adr/0003-webp-conversion.md)
 
+## Dossier surveillé en Phase 2
+
+Chokidar signale les dépôts existants et nouveaux dans `input/`. L’adaptateur compare deux observations de l’identité, de la taille et des dates du fichier avant son admission. Il revérifie ces données au moment de la prise en charge. P-Queue limite le traitement à un job à la fois, tandis que Pino journalise ses transitions et les emplacements des fichiers.
+
+Le cas d’utilisation `processWatchJob` réutilise le port WebP. Le port de stockage publie un dossier par job et archive l’original, ou le conserve dans `failed/` avec un diagnostic. Un échec d’archivage après publication conserve l’original pour inspection. [Prise en charge et transfert](adr/0004-watch-folder.md)
+
 ## Responsabilités
 
 | Emplacement cible        | Responsabilité                                                                                                                 |
@@ -36,4 +42,4 @@ Une étape appelle un port pour une opération externe. L’adaptateur implémen
 3. Préparer les variantes dans un espace temporaire du volume de sortie. Vérifier l’ensemble puis publier un répertoire de job par renommage sur ce volume. Les consommateurs lisent uniquement les emplacements publiés.
 4. Archiver l’original après publication. Pour un transfert entre volumes, copier sous un nom temporaire, vérifier la copie complète, la rendre durable et la publier avant de retirer la source. Conserver la source dès qu’une étape échoue. Au redémarrage, un identifiant commun permettra de réconcilier les copies et une publication déjà effectuée.
 
-La Phase 2 introduira la prise de possession et l’arrêt propre. La Phase 5 ajoutera les tentatives persistées et la réconciliation des fichiers avec SQLite. Un renommage et une transaction SQLite sont deux opérations distinctes. La reprise doit pouvoir vérifier laquelle a abouti.
+La Phase 5 ajoutera les tentatives persistées et la réconciliation des fichiers avec SQLite. Un renommage et une transaction SQLite sont deux opérations distinctes. La reprise doit pouvoir vérifier laquelle a abouti.

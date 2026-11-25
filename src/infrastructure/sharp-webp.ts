@@ -6,6 +6,9 @@ import type { WebpConverter } from "../application/process-image.ts";
 const supportedFormats = new Set(["jpeg", "png", "webp"]);
 const inputPixelLimit = 64_000_000;
 
+// Release input file handles before the watcher moves originals on Windows.
+sharp.cache({ files: 0 });
+
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
