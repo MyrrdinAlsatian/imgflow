@@ -2,7 +2,8 @@
 
 import { extname } from "node:path";
 import { parseArgs } from "node:util";
-import { processImage, validateWebpSettings } from "./application/process-image.ts";
+import { processImage } from "./application/process-image.ts";
+import { validateWebpSettings } from "./domain/image.ts";
 
 const webpOptions =
   "[--width 1600] [--height 1600] [--quality 85] [--remove-background [--model-cache models]]";

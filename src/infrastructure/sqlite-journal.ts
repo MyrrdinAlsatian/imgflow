@@ -1,7 +1,8 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { JobJournal, JobRecord } from "../application/job-journal.ts";
+import type { JobJournal } from "../application/job-journal.ts";
+import type { JobRecord } from "../domain/job.ts";
 
 const active = "status NOT IN ('completed', 'failed', 'cancelled')";
 const fields =

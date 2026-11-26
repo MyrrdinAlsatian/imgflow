@@ -2,8 +2,8 @@ import { join } from "node:path";
 import sharp from "sharp";
 import type { Sharp } from "sharp";
 import type { BackgroundRemover } from "../application/background-remover.ts";
-import { variantFileName } from "../application/image-pipeline.ts";
-import type { ImageVariant, PipelineStep } from "../application/image-pipeline.ts";
+import { variantFileName } from "../domain/image-pipeline.ts";
+import type { ImageVariant, PipelineStep } from "../domain/image-pipeline.ts";
 import type { JobRenderer, RenderedVariant } from "../application/process-watch-job.ts";
 import { applyForeground, openSharpImage, readRgba } from "./sharp-image.ts";
 

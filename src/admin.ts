@@ -1,7 +1,7 @@
 /** @file Local administrative commands for a PixelFlow watch service. */
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { jobStatuses } from "./application/job-journal.ts";
+import { jobStatuses } from "./domain/job.ts";
 import { loadWatchConfig } from "./infrastructure/watch-config.ts";
 
 const journal = "[--state-directory <path> | --config <pipelines.yaml>]";

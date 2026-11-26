@@ -1,5 +1,7 @@
-import type { ImageDimensions } from "./process-image.ts";
-import type { JobJournal, JobOutcome, JobRecord } from "./job-journal.ts";
+import type { ImageDimensions } from "../domain/image.ts";
+import { canRetry, retryDelayMs } from "../domain/job.ts";
+import type { JobOutcome, JobRecord } from "../domain/job.ts";
+import type { JobJournal } from "./job-journal.ts";
 
 /** An original in the service's processing directory. */
 export type ClaimedImage = Readonly<{
@@ -77,9 +79,8 @@ export async function processWatchJob(
     return { status: "failed", failedPath, error: message } as const;
   }
   async function attemptFailed(outcome: Exclude<JobOutcome, "published">, error: string) {
-    if (jobRecord.attempts <= maxRetries) {
-      const delay = Math.min(30_000, 100 * 2 ** (jobRecord.attempts - 1));
-      const retryAt = Date.now() + delay;
+    if (canRetry(jobRecord.attempts, maxRetries)) {
+      const retryAt = Date.now() + retryDelayMs(jobRecord.attempts);
       journal.finishAttempt(jobRecord, outcome, "retry", error, retryAt);
       return { status: "retry", error, retryAt } as const;
     }
@@ -98,7 +99,7 @@ export async function processWatchJob(
   }
   if (
     record.status === "failing" ||
-    (record.status === "retry" && record.attempts > maxRetries) ||
+    (record.status === "retry" && !canRetry(record.attempts, maxRetries)) ||
     (await storage.failed(job))
   ) {
     return quarantine(record.error ?? "The original was retained after a failed render.");

@@ -5,12 +5,14 @@ import { setTimeout } from "node:timers/promises";
 import { watch } from "chokidar";
 import PQueue from "p-queue";
 import type { Logger } from "pino";
-import { defaultMaxRetries, defaultScanIntervalSeconds } from "../application/job-journal.ts";
-import type { JobJournal, JobRecord } from "../application/job-journal.ts";
+import type { JobJournal } from "../application/job-journal.ts";
 import { processImage } from "../application/process-image.ts";
-import type { WebpConverter, WebpRequest } from "../application/process-image.ts";
+import type { WebpConverter } from "../application/process-image.ts";
 import { processWatchJob } from "../application/process-watch-job.ts";
 import type { JobRenderer } from "../application/process-watch-job.ts";
+import type { WebpSettings } from "../domain/image.ts";
+import { defaultMaxRetries, defaultScanIntervalSeconds } from "../domain/job.ts";
+import type { JobRecord } from "../domain/job.ts";
 import {
   fileSignature,
   openWatchStorage,
@@ -24,7 +26,7 @@ import { startWatchHealth } from "./watch-health.ts";
 import type { WatchHealth } from "./watch-health.ts";
 
 /** Directory and conversion settings shared by all jobs in a watch session. */
-type WatchSettings = Pick<WebpRequest, "width" | "height" | "quality"> & {
+type WatchSettings = WebpSettings & {
   /** Data directory containing the input and job directories. */
   root: string;
   /** Milliseconds between observations of an input file. */

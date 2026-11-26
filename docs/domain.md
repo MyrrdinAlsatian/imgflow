@@ -1,6 +1,6 @@
 # Domaine
 
-Ce vocabulaire sert à définir les comportements à tester lors des prochaines phases. Chaque type apparaîtra dans le code avec la règle qu’il porte.
+Ce vocabulaire sert à définir les comportements à tester. Les types et règles déjà implémentés vivent dans [`src/domain/`](../src/domain/) : [pipelines et variantes](../src/domain/image-pipeline.ts), [bornes d’image](../src/domain/image.ts), [statuts et reprise des jobs](../src/domain/job.ts).
 
 | Concept                              | Sens dans PixelFlow                                                                                                 |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |

@@ -1,19 +1,14 @@
-/** Parameters for converting a local image to WebP. */
-export type WebpRequest = Readonly<{
-  /** Source path. The converter must preserve the original bytes. */
-  inputPath: string;
-  /** Final destination. The converter must reject an existing file at this path. */
-  outputPath: string;
-  /** Maximum width in pixels after applying EXIF orientation, from 1 to 16,383. */
-  width: number;
-  /** Maximum height in pixels after applying EXIF orientation, from 1 to 16,383. */
-  height: number;
-  /** WebP encoder quality, from 1 to 100. */
-  quality: number;
-}>;
+import { validateWebpSettings } from "../domain/image.ts";
+import type { ImageDimensions, WebpSettings } from "../domain/image.ts";
 
-/** Actual dimensions of the published WebP in pixels. */
-export type ImageDimensions = Readonly<{ width: number; height: number }>;
+/** Parameters for converting a local image to WebP. */
+export type WebpRequest = WebpSettings &
+  Readonly<{
+    /** Source path. The converter must preserve the original bytes. */
+    inputPath: string;
+    /** Final destination. The converter must reject an existing file at this path. */
+    outputPath: string;
+  }>;
 
 /**
  * Port for reading an input image and publishing its WebP conversion.
@@ -35,19 +30,4 @@ export async function processImage(
 ): Promise<ImageDimensions> {
   validateWebpSettings(request);
   return convert(request);
-}
-
-/** Checks the numerical options shared by single conversions and watch folders. */
-export function validateWebpSettings(
-  settings: Pick<WebpRequest, "width" | "height" | "quality">,
-): void {
-  for (const [name, value, max] of [
-    ["width", settings.width, 16_383],
-    ["height", settings.height, 16_383],
-    ["quality", settings.quality, 100],
-  ] as const) {
-    if (!Number.isInteger(value) || value < 1 || value > max) {
-      throw new Error(`${name} must be an integer from 1 to ${max}.`);
-    }
-  }
 }

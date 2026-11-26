@@ -19,6 +19,7 @@ préférence qui ne contraint pas la suite du projet.
 - [ADR 0007 · Journal et reprise des jobs](0007-durable-watch-jobs.md)
 - [ADR 0008 · Image Docker et contrôle de fonctionnement](0008-container-runtime.md)
 - [ADR 0009 · Administration du journal](0009-journal-administration.md)
+- [ADR 0010 · Extraction de la couche domaine](0010-domain-layer.md)
 
 ## Format
 

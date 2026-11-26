@@ -31,11 +31,11 @@ SQLite enregistre la prise en charge avant le déplacement de l’original, puis
 
 ## Responsabilités
 
-| Emplacement cible        | Responsabilité                                                                                                                 |
+| Emplacement              | Responsabilité                                                                                                                 |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `src/domain/`            | Règles et valeurs métier, indépendantes des fichiers, de la base et des bibliothèques.                                         |
+| `src/domain/`            | Règles et valeurs métier, indépendantes des fichiers, de la base et des bibliothèques. [Décision](adr/0010-domain-layer.md)    |
 | `src/application/`       | Cas d’utilisation, orchestration et ports dont ils ont besoin. Le moteur exécute les étapes dans l’ordre déclaré.              |
-| `src/application/steps/` | Comportement d’une étape et options typées. Un registre associera chaque discriminant YAML validé à sa fabrique.               |
+| `src/application/steps/` | Cible non créée. Le registre d’étapes reste dans l’adaptateur Sharp tant qu’aucun port d’opérations d’image n’est utile.       |
 | `src/infrastructure/`    | Accès aux fichiers, décodage et encodage Sharp, surveillance Chokidar, inférence locale et stockage SQLite, au fil des phases. |
 | `src/main.ts`            | Composition des adaptateurs et gestion du démarrage et de l’arrêt du processus.                                                |
 

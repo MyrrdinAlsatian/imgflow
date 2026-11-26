@@ -6,9 +6,9 @@ ses conditions d’arrêt et met à jour son statut après exécution.
 
 ## Ordre et statut
 
-| Plan | Titre | Priorité | Effort | Dépendances | Statut |
-| ---- | ----- | -------- | ------ | ----------- | ------ |
-| 001 | Borner la concurrence par budget mémoire | P2 | M | — | TODO |
+| Plan | Titre                                    | Priorité | Effort | Dépendances | Statut |
+| ---- | ---------------------------------------- | -------- | ------ | ----------- | ------ |
+| 001  | Borner la concurrence par budget mémoire | P2       | M      | —           | TODO   |
 
 ## Dépendances
 
@@ -16,6 +16,5 @@ Aucune.
 
 ## Constats écartés
 
-- Extraire immédiatement `src/domain/` et `src/application/steps/` : la
-  documentation les présente comme une architecture cible et aucun défaut
-  fonctionnel ne justifie une refonte avant un besoin concret.
+- Créer `src/application/steps/` : exige un port abstrayant Sharp sans second
+  adaptateur ni besoin concret. `src/domain/` a été extrait à la demande (ADR 0010).

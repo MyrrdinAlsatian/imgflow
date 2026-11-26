@@ -15,7 +15,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import type { JobIdentity, JobRecord } from "../application/job-journal.ts";
+import type { JobIdentity, JobRecord } from "../domain/job.ts";
 import type { ClaimedImage, WatchJobStorage } from "../application/process-watch-job.ts";
 
 const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;

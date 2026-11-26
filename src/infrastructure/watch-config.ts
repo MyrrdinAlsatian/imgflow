@@ -2,8 +2,15 @@ import { readFile, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import * as v from "valibot";
 import { parse } from "yaml";
-import { variantFileName } from "../application/image-pipeline.ts";
-import { defaultMaxRetries, defaultScanIntervalSeconds } from "../application/job-journal.ts";
+import {
+  blurSigmaRange,
+  maxImageDimension,
+  maxImagePixels,
+  maxImageQuality,
+  pixelBlockSizeRange,
+} from "../domain/image.ts";
+import { variantFileName } from "../domain/image-pipeline.ts";
+import { defaultMaxRetries, defaultScanIntervalSeconds } from "../domain/job.ts";
 import type { WatchDirectories } from "./watch-files.ts";
 
 const pathSchema = v.pipe(
@@ -17,14 +24,28 @@ const nameSchema = v.pipe(
 );
 const color = v.pipe(v.string(), v.regex(/^#[0-9a-f]{6}$/i, "Expected an opaque #RRGGBB color."));
 const positive = v.pipe(v.number(), v.safeInteger(), v.minValue(1));
-const dimension = v.pipe(positive, v.maxValue(16_383));
-const quality = v.pipe(positive, v.maxValue(100));
+const dimension = v.pipe(positive, v.maxValue(maxImageDimension));
+const quality = v.pipe(positive, v.maxValue(maxImageQuality));
 const name = v.optional(nameSchema, "image");
 const variantResize = v.strictObject({ width: dimension, height: dimension });
 const variantEffects = v.pipe(
   v.strictObject({
-    blurSigma: v.optional(v.pipe(v.number(), v.finite(), v.minValue(0.3), v.maxValue(100))),
-    pixelBlockSize: v.optional(v.pipe(v.number(), v.safeInteger(), v.minValue(2), v.maxValue(512))),
+    blurSigma: v.optional(
+      v.pipe(
+        v.number(),
+        v.finite(),
+        v.minValue(blurSigmaRange.min),
+        v.maxValue(blurSigmaRange.max),
+      ),
+    ),
+    pixelBlockSize: v.optional(
+      v.pipe(
+        v.number(),
+        v.safeInteger(),
+        v.minValue(pixelBlockSizeRange.min),
+        v.maxValue(pixelBlockSizeRange.max),
+      ),
+    ),
   }),
   v.check(
     ({ blurSigma, pixelBlockSize }) => blurSigma !== undefined || pixelBlockSize !== undefined,
@@ -203,7 +224,7 @@ export async function loadWatchConfig(file: string) {
         if (
           current.type === "resize" &&
           current.fit !== "inside" &&
-          current.width * current.height > 64_000_000
+          current.width * current.height > maxImagePixels
         ) {
           throw new Error(`${field}.width: the resize canvas must not exceed 64 million pixels.`);
         }

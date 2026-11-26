@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { jobStatuses } from "../application/job-journal.ts";
+import { jobStatuses } from "../domain/job.ts";
 import { ensureRetryTable, openJournalDatabase, writeJournal } from "./sqlite-journal.ts";
 import { readFileStamp } from "./watch-files.ts";
 

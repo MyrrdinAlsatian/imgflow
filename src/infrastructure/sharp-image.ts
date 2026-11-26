@@ -2,9 +2,10 @@ import { stat } from "node:fs/promises";
 import sharp from "sharp";
 import type { Sharp } from "sharp";
 import type { BackgroundRemover } from "../application/background-remover.ts";
+import { maxImagePixels } from "../domain/image.ts";
 
 const supportedFormats = new Set(["jpeg", "png", "webp"]);
-const inputPixelLimit = 64_000_000;
+const inputPixelLimit = maxImagePixels;
 const maskSize = 1024;
 
 // Release input file handles before the watcher moves originals on Windows.

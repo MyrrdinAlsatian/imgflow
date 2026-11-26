@@ -6,7 +6,7 @@
 > `plans/README.md`. Ne pas créer de commit, pousser ou déployer sans autorisation.
 >
 > **Vérification de dérive (première étape)** :
-> `git diff --stat 7bc197b..HEAD -- src/infrastructure/watch-config.ts src/infrastructure/configured-watch.ts tests/configured-watch.test.ts docs/configuration.md docs/benchmarks.md docs/adr/README.md docs/adr/0010-concurrence-memoire.md`
+> `git diff --stat 7bc197b..HEAD -- src/infrastructure/watch-config.ts src/infrastructure/configured-watch.ts tests/configured-watch.test.ts docs/configuration.md docs/benchmarks.md docs/adr/README.md docs/adr/0011-concurrence-memoire.md`
 > Si un fichier de ce périmètre a changé depuis le commit de référence, comparer
 > les extraits ci-dessous au code actuel avant de continuer. Toute divergence
 > non expliquée est une condition d’arrêt.
@@ -57,11 +57,11 @@ pipelines sans BEN2 à partir d’une mesure faite sous le budget de 6 Gio.
 
 ## Commandes de vérification
 
-| Objet | Commande | Résultat attendu |
-| ----- | -------- | ---------------- |
-| Tests ciblés | `corepack pnpm test -- tests/configured-watch.test.ts` | Tous les tests de configuration et de concurrence passent. |
-| Vérification complète | `corepack pnpm check` | Format, lint, types, build, tests et démarrage compilé réussissent sous Node 24. |
-| Mesure BEN2 | `corepack pnpm bench:ben2 <image-de-test>` | Rapport reproductible du temps et du pic RSS avec cache local. |
+| Objet                 | Commande                                               | Résultat attendu                                                                 |
+| --------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| Tests ciblés          | `corepack pnpm test -- tests/configured-watch.test.ts` | Tous les tests de configuration et de concurrence passent.                       |
+| Vérification complète | `corepack pnpm check`                                  | Format, lint, types, build, tests et démarrage compilé réussissent sous Node 24. |
+| Mesure BEN2           | `corepack pnpm bench:ben2 <image-de-test>`             | Rapport reproductible du temps et du pic RSS avec cache local.                   |
 
 Ne pas installer de dépendance pour ce changement. Les mesures de modèles réels
 restent une validation dédiée; les tests ordinaires utilisent les doubles
@@ -77,7 +77,7 @@ existants et fonctionnent hors ligne.
 - `docs/configuration.md`
 - `docs/benchmarks.md`
 - `docs/adr/README.md`
-- `docs/adr/0010-concurrence-memoire.md` (nouveau)
+- `docs/adr/0011-concurrence-memoire.md` (nouveau)
 - `plans/README.md`
 
 **Hors périmètre** :
@@ -141,7 +141,7 @@ Mettre à jour `docs/configuration.md` pour décrire :
   pas une détection automatique de la RAM disponible.
 
 Mettre à jour `docs/benchmarks.md` avec les résultats reproductibles de l’étape 1.
-Créer `docs/adr/0010-concurrence-memoire.md` et l’ajouter à l’index. L’ADR doit
+Créer `docs/adr/0011-concurrence-memoire.md` et l’ajouter à l’index. L’ADR doit
 consigner le budget de 6 Gio, la règle BEN2, la méthode ayant déterminé la limite
 sans BEN2 et les conséquences si l’opérateur dispose de moins de mémoire.
 
