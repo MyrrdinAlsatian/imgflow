@@ -26,7 +26,7 @@ export async function openJobJournal(directory: string) {
     throw new Error(`Cannot lock PixelFlow state directory "${directory}".`, { cause: error });
   }
   try {
-    const db = new DatabaseSync(join(directory, "jobs.sqlite"));
+    const db = openJournalDatabase(directory, false);
     try {
       return {
         journal: createJournal(db),
@@ -50,11 +50,58 @@ export async function openJobJournal(directory: string) {
   }
 }
 
+/**
+ * Opens a connection independently of the service lock so administration can run online.
+ *
+ * @param directory - State directory containing `jobs.sqlite`.
+ * @param readOnly - Whether the connection must reject writes.
+ * @returns A connection with a configured busy timeout. The caller closes it after use.
+ */
+export function openJournalDatabase(directory: string, readOnly: boolean): DatabaseSync {
+  const db = new DatabaseSync(join(directory, "jobs.sqlite"), { readOnly });
+  try {
+    db.exec("PRAGMA busy_timeout = 2000");
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
+
+/** Creates retry lineage when absent and enforces one manual retry per failed source job. */
+export function ensureRetryTable(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS manual_retries (
+      job_id TEXT PRIMARY KEY REFERENCES jobs(id),
+      source_job_id TEXT NOT NULL UNIQUE REFERENCES jobs(id)
+    ) STRICT;
+  `);
+}
+
+/**
+ * Acquires the SQLite write lock before invoking a synchronous operation.
+ *
+ * @param db - Connection that owns the transaction.
+ * @param run - Synchronous callback whose reads and writes share the transaction.
+ * @returns The callback result after a successful commit.
+ * @throws If the lock, callback or commit fails.
+ */
+export function writeJournal<T>(db: DatabaseSync, run: () => T): T {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = run();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 /** Initializes the schema and binds durable operations to the service's database connection. */
 function createJournal(db: DatabaseSync): JobJournal {
   db.exec(`
     PRAGMA synchronous = FULL;
-    PRAGMA busy_timeout = 2000;
     CREATE TABLE IF NOT EXISTS jobs (
       id TEXT PRIMARY KEY, scope TEXT NOT NULL, name TEXT NOT NULL, layout TEXT NOT NULL,
       signature TEXT, status TEXT NOT NULL CHECK (status IN
@@ -70,10 +117,16 @@ function createJournal(db: DatabaseSync): JobJournal {
       PRIMARY KEY (job_id, number)
     ) STRICT;
   `);
+  ensureRetryTable(db);
   const insert = db.prepare(`INSERT INTO jobs
     (id, scope, name, layout, signature, status, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
   const find = db.prepare(`SELECT ${fields} FROM jobs WHERE id = ?`);
+  const retrySource = db.prepare(`
+    SELECT source.id, source.name, source.scope
+    FROM manual_retries AS retry JOIN jobs AS source ON source.id = retry.source_job_id
+    WHERE retry.job_id = ?
+  `);
   const findClaim = db.prepare(
     `SELECT ${fields} FROM jobs WHERE scope = ? AND name = ? AND status = 'claiming'`,
   );
@@ -99,19 +152,6 @@ function createJournal(db: DatabaseSync): JobJournal {
 
   // The strict table and the shared SELECT projection define the record shape.
   const read = (id: string) => find.get(id) as JobRecord | undefined;
-  /** Commits both the attempt row and its job checkpoint, or rolls back both writes. */
-  function transaction<T>(run: () => T): T {
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const result = run();
-      db.exec("COMMIT");
-      return result;
-    } catch (error) {
-      db.exec("ROLLBACK");
-      throw error;
-    }
-  }
-
   return {
     add(job, layout, signature) {
       const status = signature === null ? "pending" : "claiming";
@@ -120,6 +160,7 @@ function createJournal(db: DatabaseSync): JobJournal {
       return { ...job, signature, status, attempts: 0, retryAt: null, error: null };
     },
     find: read,
+    retrySource: (id) => retrySource.get(id) as ReturnType<JobJournal["retrySource"]>,
     claiming: (scope, name) => findClaim.get(scope, name) as JobRecord | undefined,
     unfinished: (scope) => unfinished.all(scope) as JobRecord[],
     assertLayouts(available) {
@@ -143,7 +184,7 @@ function createJournal(db: DatabaseSync): JobJournal {
     },
     startAttempt(job) {
       const attempts = job.attempts + 1;
-      transaction(() => {
+      writeJournal(db, () => {
         const now = Date.now();
         start.run(attempts, now, job.id);
         addAttempt.run(job.id, attempts, now);
@@ -151,7 +192,7 @@ function createJournal(db: DatabaseSync): JobJournal {
       return { ...job, attempts, status: "running", retryAt: null };
     },
     finishAttempt(job, outcome, status, error, retryAt) {
-      transaction(() => {
+      writeJournal(db, () => {
         const now = Date.now();
         endAttempt.run(outcome, error ?? null, now, job.id, job.attempts);
         end.run(status, error ?? null, retryAt ?? null, now, job.id);

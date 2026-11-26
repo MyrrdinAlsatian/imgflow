@@ -11,6 +11,7 @@ const usage = [
   `  pixelflow process <input> <output.webp> ${webpOptions}`,
   `  pixelflow watch [data-directory] ${webpOptions} [--stability-ms 2000]`,
   "  pixelflow watch --config <pipelines.yaml>",
+  "  pixelflow admin --help",
 ].join("\n");
 const [command, ...args] = process.argv.slice(2);
 
@@ -50,6 +51,9 @@ try {
     console.log("PixelFlow foundation is ready.");
   } else if (command === "--help") {
     console.log(usage);
+  } else if (command === "admin") {
+    const { runAdmin } = await import("./admin.ts");
+    await runAdmin(args);
   } else if (command === "process" || command === "watch") {
     const { values, positionals, tokens } = parseArgs({
       args,

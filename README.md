@@ -79,6 +79,18 @@ Les mesures de temps et de mémoire se reproduisent avec `corepack pnpm bench:be
 
 Sur Linux, Compose construit l’image, monte les données persistantes et démarre le service avec l’utilisateur `node`. La configuration fournie traite les dépôts dans `data/input` et publie les variantes WebP dans `data/output`. Le guide décrit les permissions, le cache BEN2, la vérification du service et la sauvegarde. [Guide d’exploitation](docs/deployment.md)
 
+## Administrer le service
+
+La commande `admin` permet de valider un YAML, consulter l’historique et les métriques, puis relancer un job en échec. Les commandes écrivent leurs résultats en JSON.
+
+```sh
+node dist/main.js admin validate ./pixelflow.yaml
+node dist/main.js admin jobs --config ./pixelflow.yaml --status failed
+node dist/main.js admin metrics --config ./pixelflow.yaml
+```
+
+Le guide décrit la relance à partir de l’original conservé et les commandes utilisables dans le conteneur. [Administration](docs/administration.md)
+
 ## Commandes de développement
 
 Utiliser `corepack pnpm <script>`, ou `pnpm <script>` si le lanceur pnpm utilise la version épinglée.

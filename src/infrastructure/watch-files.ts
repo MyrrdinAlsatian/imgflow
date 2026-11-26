@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
 import type { BigIntStats } from "node:fs";
 import {
+  chmod,
   copyFile,
   lstat,
   mkdir,
@@ -72,6 +73,40 @@ async function syncPath(path: string, flags: "r" | "r+"): Promise<void> {
 }
 
 /**
+ * Verifies the SHA-256 of a staged copy and publishes it in the reserved destination directory.
+ *
+ * @param source - Original file to copy.
+ * @param destination - Final path for the working copy.
+ * @param expected - Source identity and timestamps observed before the copy.
+ * @returns True once the verified copy is available, or false if the source changed during copying.
+ */
+async function copyOriginal(
+  source: string,
+  destination: string,
+  expected: BigIntStats,
+): Promise<boolean> {
+  const temporary = join(dirname(destination), `.transfer-${randomUUID()}`);
+  try {
+    await copyFile(source, temporary, constants.COPYFILE_EXCL);
+    const [sourceHash, copyHash] = await Promise.all([digest(source), digest(temporary)]);
+    if (!sameFile(expected, await readFileStamp(source))) return false;
+    if (sourceHash !== copyHash) throw new Error(`Copied file did not match "${source}".`);
+
+    // Windows needs a writable handle to flush the working copy, even for read-only originals.
+    if (process.platform === "win32" && !(expected.mode & 0o200n)) {
+      await chmod(temporary, 0o600);
+    }
+    await syncPath(temporary, process.platform === "win32" ? "r+" : "r");
+    await rename(temporary, destination);
+    // Windows does not expose directory handles that can be flushed through fs.open.
+    if (process.platform !== "win32") await syncPath(dirname(destination), "r");
+    return true;
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+/**
  * Moves a regular file into a reserved destination directory. On EXDEV, copies and verifies
  * the file on the destination volume before removing the source.
  *
@@ -98,17 +133,8 @@ export async function moveOriginal(
     if (!hasCode(error, "EXDEV")) throw error;
   }
 
-  const temporary = join(dirname(destination), `.transfer-${randomUUID()}`);
   try {
-    await copyFile(source, temporary, constants.COPYFILE_EXCL);
-    const [sourceHash, copyHash] = await Promise.all([digest(source), digest(temporary)]);
-    if (!sameFile(expected, await readFileStamp(source))) return false;
-    if (sourceHash !== copyHash) throw new Error(`Copied file did not match "${source}".`);
-
-    await syncPath(temporary, "r+");
-    await rename(temporary, destination);
-    // Windows does not expose directory handles that can be flushed through fs.open.
-    if (process.platform !== "win32") await syncPath(dirname(destination), "r");
+    if (!(await copyOriginal(source, destination, expected))) return false;
     if (!sameFile(expected, await readFileStamp(source))) {
       throw new Error(`Source changed after copying "${source}". The copy is at "${destination}".`);
     }
@@ -116,8 +142,6 @@ export async function moveOriginal(
     return true;
   } catch (error) {
     throw new Error(`Could not transfer "${source}" to "${destination}".`, { cause: error });
-  } finally {
-    await rm(temporary, { force: true });
   }
 }
 
@@ -326,6 +350,32 @@ export async function openWatchStorage({
       await mkdir(dirname(job.path), { recursive: true });
       if (!(await moveOriginal(source, job.path, stamp))) return false;
       await cleanTransfers(dirname(job.path));
+      return true;
+    },
+    /**
+     * Restores a manual retry's working copy from the retained failed original. A copy published
+     * before an interruption is reusable. The retained original stays in the failure directory.
+     *
+     * @param job - Retry job and its destination path in processing.
+     * @param previous - Source job in the same pipeline with the same original filename.
+     * @returns True once a working copy exists, or false if the required original is unavailable.
+     */
+    async restoreRetry(job: ClaimedImage, previous: JobIdentity): Promise<boolean> {
+      const source = claimed(previous);
+      if (previous.scope !== input || source.name !== job.name) {
+        throw new Error(`Retry source does not match job "${job.id}".`);
+      }
+      const directory = dirname(job.path);
+      if (!(await readFileStamp(job.path))) {
+        const path = join(failed, source.id, "original", source.name);
+        const stamp = await readFileStamp(path);
+        if (!stamp) return false;
+        await mkdir(directory, { recursive: true });
+        if (!(await copyOriginal(path, job.path, stamp))) {
+          throw new Error(`Retained original changed while copying "${path}".`);
+        }
+      }
+      await cleanTransfers(directory);
       return true;
     },
   };

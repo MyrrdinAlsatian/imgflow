@@ -8,16 +8,19 @@ export const defaultScanIntervalSeconds = 60;
  * `published` and `failing` leave the corresponding archive or quarantine move to finish.
  * Completed, failed and cancelled jobs are terminal.
  */
-export type JobStatus =
-  | "claiming"
-  | "pending"
-  | "running"
-  | "retry"
-  | "published"
-  | "failing"
-  | "completed"
-  | "failed"
-  | "cancelled";
+export const jobStatuses = [
+  "claiming",
+  "pending",
+  "running",
+  "retry",
+  "published",
+  "failing",
+  "completed",
+  "failed",
+  "cancelled",
+] as const;
+
+export type JobStatus = (typeof jobStatuses)[number];
 
 /** Stable job ID, original filename and absolute input directory used to scope recovery. */
 export type JobIdentity = Readonly<{ id: string; name: string; scope: string }>;
@@ -45,6 +48,8 @@ export type JobJournal = Readonly<{
   add(job: JobIdentity, layout: string, signature: string | null): JobRecord;
   /** Reads the latest checkpoint for a job, including terminal states. */
   find(id: string): JobRecord | undefined;
+  /** Returns the source job for a manual retry, or undefined for an ordinary deposit. */
+  retrySource(id: string): JobIdentity | undefined;
   /** Finds the outstanding claim for a filename in this input directory. */
   claiming(scope: string, name: string): JobRecord | undefined;
   /** Lists jobs for this input directory that can still require work. */

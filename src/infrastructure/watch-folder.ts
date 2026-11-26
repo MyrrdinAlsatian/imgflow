@@ -187,7 +187,14 @@ export async function runWatchFolders(
 
 async function watchPipeline(
   { directories, stabilityMs, render }: WatchPipeline,
-  { input, storage, claim, claimed, recoverableJobs }: Awaited<ReturnType<typeof openWatchStorage>>,
+  {
+    input,
+    storage,
+    claim,
+    claimed,
+    recoverableJobs,
+    restoreRetry,
+  }: Awaited<ReturnType<typeof openWatchStorage>>,
   queue: PQueue,
   logger: Logger,
   signal: AbortSignal,
@@ -231,6 +238,15 @@ async function watchPipeline(
       journal.set(record, "pending");
       record = { ...record, status: "pending" };
       logger.info({ jobId: job.id, name: job.name, originalPath: job.path }, "Image claimed");
+    }
+    if (record.status === "pending") {
+      const previous = journal.retrySource(job.id);
+      if (previous && !(await restoreRetry(job, previous))) {
+        const message = "The retained original is unavailable for this manual retry.";
+        journal.set(record, "cancelled", message);
+        logger.warn({ jobId: job.id, retryOf: previous.id }, message);
+        return false;
+      }
     }
     const result = await processWatchJob(record, job, render, storage, journal, maxRetries);
     if (result.status === "retry") {

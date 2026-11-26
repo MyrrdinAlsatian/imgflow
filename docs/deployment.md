@@ -46,6 +46,10 @@ docker compose ps
 docker inspect --format '{{json .State.Health}}' "$(docker compose ps -q pixelflow)"
 ```
 
+## Consulter et relancer des jobs
+
+Utiliser le CLI `admin` dans le conteneur pour lire le journal, consulter les métriques et programmer une relance. [Administration dans le conteneur](administration.md#utiliser-la-cli-dans-le-conteneur)
+
 ## Arrêter, recréer et sauvegarder
 
 `docker compose stop` transmet l’arrêt au service et lui laisse jusqu’à deux minutes pour finir le travail engagé. Avec les mêmes montages, `docker compose up -d --force-recreate` retrouve les fichiers, les modèles et le journal. Les dépôts publiés gardent leur identifiant de job.
