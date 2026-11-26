@@ -49,6 +49,74 @@ docker compose ps
 docker inspect --format '{{json .State.Health}}' "$(docker compose ps -q pixelflow)"
 ```
 
+## Dépannage courant
+
+### Le conteneur redémarre avec `EACCES`
+
+Le service tourne avec l’UID et le GID `1000`. Vérifier les droits du volume :
+
+```sh
+stat -c '%u:%g %a %n' data data/input models
+docker compose logs --tail=100 pixelflow
+```
+
+Le conteneur doit écrire dans `data/` et lire `models/`. Corriger uniquement les répertoires de l’installation :
+
+```sh
+sudo chown -R 1000:1000 data
+sudo chmod -R u+rwX,g+rwX data
+sudo chmod -R a+rX models
+docker compose up -d --force-recreate
+```
+
+Pour conserver l’écriture directe par le compte hôte, configurer une ACL plutôt que d’ouvrir les droits à tous les utilisateurs.
+
+### Le conteneur reste `unhealthy`
+
+Lire les journaux et le détail du contrôle :
+
+```sh
+docker compose ps
+docker compose logs --tail=200 pixelflow
+docker inspect --format '{{json .State.Health}}' "$(docker compose ps -q pixelflow)"
+```
+
+Le contrôle échoue si le fichier de santé est périmé, si un dossier n’est plus accessible, si SQLite ne peut pas ouvrir une transaction ou si un job dépasse `PIXELFLOW_HEALTH_MAX_JOB_SECONDS`. Corriger la cause indiquée, puis recréer le service.
+
+### BEN2 ne se charge pas
+
+Vérifier la présence et la somme du cache depuis l’hôte :
+
+```sh
+test -s models/ben2/config.json
+test -s models/ben2/preprocessor_config.json
+test -s models/ben2/onnx/model_fp16.onnx
+corepack pnpm model:prepare ./models
+docker compose up -d --force-recreate
+```
+
+La commande `model:prepare` doit être exécutée avec Node 24 et une connexion réseau lors de la première installation. Le conteneur ne télécharge aucun fichier et monte `/models` en lecture seule.
+
+### Une image n’est pas traitée
+
+Vérifier que le fichier est directement dans `data/input/`, qu’il n’est ni caché ni dans un sous-dossier, et qu’il utilise le contenu d’un JPEG, PNG ou WebP à une seule image. Pour une copie longue, terminer par `.part` ou `.tmp`, puis renommer :
+
+```sh
+mv data/input/photo.jpg.part data/input/photo.jpg
+docker compose logs --tail=100 pixelflow
+```
+
+Un fichier déplacé dans `data/processing/` est pris en charge. Un traitement réussi termine dans `data/archive/`; un traitement épuisé termine dans `data/failed/` avec `error.json`.
+
+### Le traitement consomme beaucoup de mémoire
+
+BEN2 utilise le CPU et peut consommer plusieurs Gio de mémoire pendant l’inférence. Le benchmark de référence a observé un pic de 4,42 Gio sur Windows. Éviter de limiter le conteneur sous cette valeur sans validation et surveiller la consommation :
+
+```sh
+docker compose stats --no-stream pixelflow
+free -h
+```
+
 ## Consulter et relancer des jobs
 
 Utiliser le CLI `admin` dans le conteneur pour lire le journal, consulter les métriques et programmer une relance. [Administration dans le conteneur](administration.md#utiliser-la-cli-dans-le-conteneur)

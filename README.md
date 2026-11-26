@@ -4,7 +4,119 @@ PixelFlow est un projet de moteur de traitement d’images auto-hébergé. À te
 
 **PixelFlow convertit une image locale en WebP ou traite automatiquement les dépôts d’un dossier surveillé.**
 
-## Installer et lancer
+## Installer le service avec Docker Compose
+
+Ce parcours installe le service complet : détourage BEN2, WebP principal, image fortement floue et pixelisée, et miniatures 256/512 px.
+
+### Prérequis
+
+- Linux amd64 ou arm64 ;
+- Docker Engine avec BuildKit et le plugin Docker Compose v2 ;
+- Node.js 24.14.0 ou plus récent dans la série 24, avec Corepack ;
+- au moins 6 Gio de mémoire disponible pour une inférence BEN2 confortable ;
+- environ 219 Mo pour le cache BEN2, plus l’espace des images et des sorties.
+
+### Installation
+
+Depuis la racine du dépôt :
+
+```sh
+corepack pnpm install --frozen-lockfile
+mkdir -p data/input models
+corepack pnpm model:prepare ./models
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps
+```
+
+Le téléchargement du modèle nécessite une connexion réseau. Après cette étape, le service charge le cache local et son conteneur fonctionne sans réseau.
+
+Le conteneur s’exécute avec l’UID et le GID `1000`. Il doit pouvoir écrire dans `data/` et lire `models/`. Si Docker signale `EACCES`, appliquer les droits à l’arborescence de données avant de redémarrer :
+
+```sh
+sudo chown -R 1000:1000 data
+sudo chmod -R u+rwX,g+rwX data
+sudo chmod -R a+rX models
+docker compose up -d --force-recreate
+```
+
+Si l’utilisateur hôte doit continuer à écrire directement dans `data/`, utiliser une ACL ou déposer les fichiers avec les droits du propriétaire du répertoire. Ne pas rendre `models/` ou `data/` accessibles à tous sans nécessité.
+
+### Premier traitement
+
+Le dépôt doit se faire dans `data/input/`. Pour éviter qu’une copie longue soit prise en charge trop tôt, utiliser un nom temporaire puis le renommer :
+
+```sh
+cp chemin/vers/photo.jpg data/input/photo.jpg.part
+mv data/input/photo.jpg.part data/input/photo.jpg
+docker compose logs --tail=100 pixelflow
+```
+
+Vérifier le service et les sorties :
+
+```sh
+docker compose ps
+find data/output -type f \( \
+  -name image.webp -o \
+  -name blurred-pixelated.webp -o \
+  -name 'thumbnail-*.webp' \
+\) -print
+find data/archive -type f -name photo.jpg -print
+```
+
+Le statut doit devenir `healthy`. Un job produit, dans son dossier `data/output/<id>/` :
+
+| Fichier                  | Contenu                                          |
+| ------------------------ | ------------------------------------------------ |
+| `image.webp`             | Image WebP avec détourage BEN2.                  |
+| `blurred-pixelated.webp` | Variante fortement floue puis pixelisée.         |
+| `thumbnail-256.webp`     | Miniature dont le côté long est limité à 256 px. |
+| `thumbnail-512.webp`     | Miniature dont le côté long est limité à 512 px. |
+
+Une petite image n’est pas agrandie : ses miniatures peuvent donc être plus petites que 256 ou 512 px. L’original traité est déplacé dans `data/archive/<id>/`. Un échec conserve l’original et son diagnostic dans `data/failed/<id>/`.
+
+### Commandes quotidiennes
+
+```sh
+# Suivre les journaux
+docker compose logs -f --tail=100 pixelflow
+
+# Vérifier la santé détaillée
+docker compose ps
+docker inspect --format '{{json .State.Health}}' "$(docker compose ps -q pixelflow)"
+
+# Arrêter puis reprendre
+docker compose stop
+docker compose start
+
+# Recréer après une modification de configuration
+docker compose up -d --force-recreate
+```
+
+Pour arrêter le service sans supprimer les données, utiliser `docker compose stop`. Ne pas supprimer `data/` ni `models/` : ils contiennent respectivement le journal SQLite, les originaux et le modèle.
+
+### Mise à jour et sauvegarde
+
+Après une mise à jour du dépôt ou de l’image Node :
+
+```sh
+corepack pnpm install --frozen-lockfile
+corepack pnpm model:prepare ./models
+docker compose build --pull
+docker compose up -d --force-recreate
+docker compose ps
+```
+
+Avant une migration ou une suppression de fichiers, arrêter le service puis sauvegarder ensemble `data/`, `models/` et `docker/pixelflow.yaml` :
+
+```sh
+docker compose stop
+tar -czf "pixelflow-backup-$(date +%F).tar.gz" data models docker/pixelflow.yaml
+```
+
+Le [guide d’exploitation Docker](docs/deployment.md) décrit les montages, les permissions et le dépannage.
+
+## Utiliser le traitement local
 
 Utiliser Node.js 24 LTS (24.14.0 minimum) avec Corepack. Depuis la racine du dépôt, lancer les commandes suivantes. Corepack lit le champ `packageManager` pour sélectionner pnpm 10.34.9. Le premier téléchargement des outils nécessite un accès au registre npm.
 
