@@ -20,20 +20,47 @@ const positive = v.pipe(v.number(), v.safeInteger(), v.minValue(1));
 const dimension = v.pipe(positive, v.maxValue(16_383));
 const quality = v.pipe(positive, v.maxValue(100));
 const name = v.optional(nameSchema, "image");
+const variantResize = v.strictObject({ width: dimension, height: dimension });
+const variantEffects = v.pipe(
+  v.strictObject({
+    blurSigma: v.optional(v.pipe(v.number(), v.finite(), v.minValue(0.3), v.maxValue(100))),
+    pixelBlockSize: v.optional(v.pipe(v.number(), v.safeInteger(), v.minValue(2), v.maxValue(512))),
+  }),
+  v.check(
+    ({ blurSigma, pixelBlockSize }) => blurSigma !== undefined || pixelBlockSize !== undefined,
+    "Configure at least one image effect.",
+  ),
+);
+const variantOptions = {
+  resize: v.optional(variantResize),
+  effects: v.optional(variantEffects),
+};
 
 const variant = v.variant("format", [
-  v.strictObject({ format: v.literal("webp"), name, quality: v.optional(quality, 85) }),
-  v.strictObject({ format: v.literal("avif"), name, quality: v.optional(quality, 65) }),
+  v.strictObject({
+    format: v.literal("webp"),
+    name,
+    quality: v.optional(quality, 85),
+    ...variantOptions,
+  }),
+  v.strictObject({
+    format: v.literal("avif"),
+    name,
+    quality: v.optional(quality, 65),
+    ...variantOptions,
+  }),
   v.strictObject({
     format: v.literal("png"),
     name,
     compressionLevel: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(9)), 6),
+    ...variantOptions,
   }),
   v.strictObject({
     format: v.literal("jpeg"),
     name,
     quality: v.optional(quality, 85),
     background: v.optional(color, "#ffffff"),
+    ...variantOptions,
   }),
 ]);
 

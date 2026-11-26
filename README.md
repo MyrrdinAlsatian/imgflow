@@ -77,7 +77,7 @@ Les mesures de temps et de mémoire se reproduisent avec `corepack pnpm bench:be
 
 ## Déployer avec Docker Compose
 
-Sur Linux, Compose construit l’image, monte les données persistantes et démarre le service avec l’utilisateur `node`. La configuration fournie traite les dépôts dans `data/input` et publie les variantes WebP dans `data/output`. Le guide décrit les permissions, le cache BEN2, la vérification du service et la sauvegarde. [Guide d’exploitation](docs/deployment.md)
+Sur Linux, Compose construit l’image et démarre le service avec l’utilisateur `node`. Le YAML fourni détourne les dépôts de `data/input` avec BEN2, puis publie le WebP principal, une variante floue et pixelisée et des miniatures 256/512 px dans `data/output`. Préparer d’abord le cache BEN2 de 219 Mo. [Guide d’exploitation](docs/deployment.md)
 
 ## Administrer le service
 

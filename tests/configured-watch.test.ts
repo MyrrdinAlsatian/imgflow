@@ -151,6 +151,140 @@ pipelines:
   }
 });
 
+test("renders a blurred and pixelated variant alongside aspect-preserving thumbnails", async () => {
+  const width = 64;
+  const height = 32;
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const value = (Math.floor(x / 16) + Math.floor(y / 16)) % 2 === 0 ? 255 : 0;
+      pixels.set([value, value, value, 255], (y * width + x) * 4);
+    }
+  }
+  const input = join(root, "pattern.png");
+  const staging = join(root, "staging");
+  await writeFile(
+    input,
+    await sharp(pixels, { raw: { width, height, channels: 4 } })
+      .png()
+      .toBuffer(),
+  );
+  await mkdir(staging);
+
+  const render = createPipelineRenderer([
+    { type: "normalize" },
+    {
+      type: "export",
+      variants: [
+        { format: "png", name: "image", compressionLevel: 6 },
+        {
+          format: "png",
+          name: "blurred",
+          compressionLevel: 6,
+          effects: { blurSigma: 12 },
+        },
+        {
+          format: "png",
+          name: "pixelated",
+          compressionLevel: 6,
+          effects: { pixelBlockSize: 8 },
+        },
+        {
+          format: "png",
+          name: "blurred-pixelated",
+          compressionLevel: 6,
+          effects: { blurSigma: 12, pixelBlockSize: 8 },
+        },
+        {
+          format: "png",
+          name: "thumbnail",
+          compressionLevel: 6,
+          resize: { width: 16, height: 16 },
+        },
+      ],
+    },
+  ]);
+  const rendered = await render(input, staging);
+
+  expect(rendered.map(({ name }) => name).sort()).toEqual([
+    "blurred-pixelated.png",
+    "blurred.png",
+    "image.png",
+    "pixelated.png",
+    "thumbnail.png",
+  ]);
+  const blurredPixels = await sharp(join(staging, "blurred.png")).ensureAlpha().raw().toBuffer();
+  const pixelatedPixels = await sharp(join(staging, "pixelated.png"))
+    .ensureAlpha()
+    .raw()
+    .toBuffer();
+  const combined = sharp(join(staging, "blurred-pixelated.png"));
+  expect(await combined.metadata()).toMatchObject({ format: "png", width, height });
+  const combinedPixels = await combined.ensureAlpha().raw().toBuffer();
+  const pixelAt = (data: Buffer, x: number, y: number) => [
+    ...data.subarray((y * width + x) * 4, (y * width + x) * 4 + 4),
+  ];
+  expect(blurredPixels.equals(pixels)).toBe(false);
+  expect(pixelatedPixels.equals(pixels)).toBe(false);
+  expect(combinedPixels.equals(pixelatedPixels)).toBe(false);
+  expect(pixelAt(pixelatedPixels, 0, 0)).toEqual(pixelAt(pixelatedPixels, 7, 7));
+  expect(pixelAt(combinedPixels, 0, 0)).toEqual(pixelAt(combinedPixels, 7, 7));
+  expect(await sharp(join(staging, "thumbnail.png")).metadata()).toMatchObject({
+    format: "png",
+    width: 16,
+    height: 8,
+  });
+});
+
+test("validates variant resize and effect settings", async () => {
+  const yaml = `
+version: 1
+pipelines:
+  gallery:
+    watch: input
+    output: output
+    archive: archive
+    failed: failed
+    steps:
+      - type: normalize
+      - type: export
+        variants:
+          - format: webp
+            name: blurred-pixelated
+            resize:
+              width: 256
+              height: 256
+            effects:
+              blurSigma: 40
+              pixelBlockSize: 32
+`;
+  await writeFile(config, yaml);
+  expect(await loadWatchConfig(config)).toMatchObject({
+    pipelines: [
+      {
+        steps: [
+          { type: "normalize" },
+          {
+            type: "export",
+            variants: [
+              {
+                name: "blurred-pixelated",
+                resize: { width: 256, height: 256 },
+                effects: { blurSigma: 40, pixelBlockSize: 32 },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  await writeFile(config, yaml.replace("blurSigma: 40", "blurSigma: 0.2"));
+  await expect(loadWatchConfig(config)).rejects.toThrow(
+    "pipelines.gallery.steps[1].variants[0].effects.blurSigma",
+  );
+});
+
 test("rejects an invalid field from the normal CLI before creating watcher directories", async () => {
   await writeFile(
     config,

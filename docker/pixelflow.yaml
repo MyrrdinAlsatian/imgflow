@@ -14,6 +14,23 @@ pipelines:
       - type: resize
         width: 1600
         height: 1600
+      - type: remove-background
+        model: ben2
       - type: export
         variants:
           - format: webp
+          - format: webp
+            name: blurred-pixelated
+            effects:
+              blurSigma: 40
+              pixelBlockSize: 2
+          - format: webp
+            name: thumbnail-256
+            resize:
+              width: 256
+              height: 256
+          - format: webp
+            name: thumbnail-512
+            resize:
+              width: 512
+              height: 512

@@ -20,6 +20,33 @@ async function materialize(image: Sharp): Promise<Sharp> {
   return sharp(data, { raw });
 }
 
+async function pixelate(image: Sharp, blockSize: number): Promise<Sharp> {
+  const { data, raw } = await readRgba(image);
+  const width = Math.max(1, Math.ceil(raw.width / blockSize));
+  const height = Math.max(1, Math.ceil(raw.height / blockSize));
+  const reduced = await materialize(sharp(data, { raw }).resize(width, height, { fit: "fill" }));
+  return materialize(reduced.resize(raw.width, raw.height, { fit: "fill", kernel: "nearest" }));
+}
+
+async function transformVariant(image: Sharp, variant: ImageVariant): Promise<Sharp> {
+  let transformed = image.clone();
+  if (variant.resize) {
+    transformed = await materialize(
+      transformed.resize(variant.resize.width, variant.resize.height, {
+        fit: "inside",
+        withoutEnlargement: true,
+      }),
+    );
+  }
+  if (variant.effects?.blurSigma !== undefined) {
+    transformed = await materialize(transformed.blur(variant.effects.blurSigma));
+  }
+  if (variant.effects?.pixelBlockSize !== undefined) {
+    transformed = await pixelate(transformed, variant.effects.pixelBlockSize);
+  }
+  return transformed;
+}
+
 /**
  * Crops around pixels whose alpha is at least 16 out of 255, with a proportional margin
  * clipped to the original bounds. Keeps the frame dimensions if no pixel meets the threshold.
@@ -119,8 +146,17 @@ export function createPipelineRenderer(
         const rendered: RenderedVariant[] = [];
         for (const variant of step.variants) {
           const name = variantFileName(variant);
+          let transformed: Sharp;
           try {
-            const { width, height } = await encode(image.clone(), variant).toFile(
+            transformed = await transformVariant(image, variant);
+          } catch (error) {
+            throw new Error(
+              `Could not transform "${name}": ${error instanceof Error ? error.message : String(error)}`,
+              { cause: error },
+            );
+          }
+          try {
+            const { width, height } = await encode(transformed, variant).toFile(
               join(staging, name),
             );
             rendered.push({ name, dimensions: { width, height } });

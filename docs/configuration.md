@@ -25,6 +25,16 @@ pipelines:
       - type: export
         variants:
           - format: webp
+          - format: webp
+            name: blurred-pixelated
+            effects:
+              blurSigma: 40
+              pixelBlockSize: 32
+          - format: webp
+            name: thumbnail-256
+            resize:
+              width: 256
+              height: 256
           - format: avif
             quality: 65
           - format: jpeg
@@ -76,7 +86,15 @@ Les étapes sont exécutées dans l’ordre du YAML. `normalize`, lorsqu’elle 
 | `resize`            | `width` et `height` vont de 1 à 16 383. Avec `inside` (par défaut), l’image tient dans ces limites sans agrandissement. `contain` complète le cadre et `cover` recadre pour remplir les dimensions exactes. Ces deux modes acceptent jusqu’à 64 millions de pixels. La couleur de fond de `contain` vaut `transparent` ou une couleur `"#RRGGBB"`. |
 | `export`            | Encode toutes les variantes dans un répertoire temporaire avant de publier le lot sous `output/<id-de-job>/`.                                                                                                                                                                                                                                      |
 
-Les variantes héritent des dimensions issues des étapes. Le nom par défaut est `image`. Utiliser des noms distincts pour sortir plusieurs variantes d’un même format, par exemple `hero.webp` et `compact.webp`. JPEG utilise l’extension `.jpg`. WebP, AVIF et JPEG acceptent une qualité de 1 à 100, respectivement 85, 65 et 85 par défaut. PNG accepte un `compressionLevel` de 0 à 9, avec 6 par défaut. JPEG aplatit la transparence sur `background`, blanc par défaut.
+Les variantes partent de l’image produite par les étapes communes et peuvent préciser leurs propres options :
+
+| Option                           | Effet                                                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `resize.width` / `resize.height` | Limites maximales, de 1 à 16 383 pixels. Conserve les proportions, ne recadre pas et n’agrandit pas l’image. |
+| `effects.blurSigma`              | Flou gaussien, sigma de 0,3 à 100. Une valeur élevée produit un flou plus fort.                              |
+| `effects.pixelBlockSize`         | Taille maximale des blocs de pixelisation, entier de 2 à 512 pixels.                                         |
+
+Pour une variante, les opérations s’appliquent après les étapes communes, dans cet ordre : redimensionnement, flou, pixelisation. Le nom par défaut est `image`. Utiliser des noms distincts pour sortir plusieurs variantes d’un même format, par exemple `hero.webp` et `compact.webp`. JPEG utilise l’extension `.jpg`. WebP, AVIF et JPEG acceptent une qualité de 1 à 100, respectivement 85, 65 et 85 par défaut. PNG accepte un `compressionLevel` de 0 à 9, avec 6 par défaut. JPEG aplatit la transparence sur `background`, blanc par défaut.
 
 Une clé inconnue, une étape mal placée ou une valeur invalide interrompt le démarrage avec le chemin du champ concerné, par exemple `pipelines.photos.steps[1].width`. Si un encodeur échoue, le service retire les variantes temporaires puis réessaie selon le budget. Lorsque le budget est épuisé, il conserve l’original et son diagnostic dans `failed/`.
 

@@ -8,6 +8,7 @@ Depuis la racine du dépôt, créer les répertoires hôte. Le conteneur tourne 
 
 ```sh
 mkdir -p ./data/input ./models
+corepack pnpm model:prepare ./models
 docker compose config --quiet
 docker compose up -d --build
 docker compose ps
@@ -23,9 +24,11 @@ Si le compte hôte utilise un autre UID, attribuer l’accès à l’UID et au G
 
 Les variables `PIXELFLOW_DATA_DIR`, `PIXELFLOW_MODELS_DIR` et `PIXELFLOW_CONFIG_FILE` sélectionnent d’autres chemins hôte. Pour personnaliser les pipelines, copier le fichier fourni, modifier les chemins **dans le conteneur** sous `/data`, puis renseigner `PIXELFLOW_CONFIG_FILE` avant de recréer le service. Conserver `/data/state` comme répertoire d’état. [Schéma YAML](configuration.md)
 
-### Activer BEN2
+### Cache BEN2 et variantes publiées
 
-Sur une machine connectée où Node et pnpm sont disponibles, exécuter `corepack pnpm model:prepare ./models`, puis rendre le cache obtenu accessible en lecture au conteneur. Ajouter `type: remove-background` avec `model: ben2` au pipeline, entre `normalize` et `resize`. Le YAML fourni référence `/models`. Le service charge le modèle local et fonctionne sans réseau. Les mesures de mémoire et de latence sont documentées pour dimensionner l’hôte. [Mesures BEN2](benchmarks.md)
+La configuration fournie active `remove-background`. Avant le premier démarrage, `corepack pnpm model:prepare ./models` télécharge le cache BEN2 FP16 (environ 219 Mo) et vérifie les sommes SHA-256. Le conteneur monte ce cache en lecture seule et fonctionne ensuite sans réseau. Il publie `image.webp`, `blurred-pixelated.webp`, `thumbnail-256.webp` et `thumbnail-512.webp`; le détourage est appliqué avant ces variantes.
+
+Le benchmark Windows a mesuré un pic RSS de 4,42 Gio. Un essai d’inférence hors ligne passe aussi sur Linux CPU avec la fixture du dépôt; la qualité sur corpus et le pic RSS à froid restent à mesurer sur l’hôte cible. [Mesures BEN2](benchmarks.md)
 
 ## Vérifier le service
 

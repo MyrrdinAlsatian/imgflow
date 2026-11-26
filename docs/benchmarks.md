@@ -22,7 +22,7 @@ La photo NASA d’Eileen Collins (512 × 512) provient du fichier `skimage/data/
 | À chaud 2  | 10,604 s           | 10,682 s                 |
 | À chaud 3  | 10,428 s           | 10,505 s                 |
 
-Le dossier surveillé compilé a produit un WebP RGBA 512 × 512 et une archive identique à la source. L’alpha décodé vaut 0 au point de fond (10, 10) et 254 au point du sujet (220, 100). L’image de référence ne fournit pas de masque annoté. Cet essai vérifie le parcours complet et laisse l’évaluation de la qualité sur un corpus et la validation Linux ouvertes.
+Le dossier surveillé compilé a produit un WebP RGBA 512 × 512 et une archive identique à la source. L’alpha décodé vaut 0 au point de fond (10, 10) et 254 au point du sujet (220, 100). L’image de référence ne fournit pas de masque annoté. Un essai d’inférence hors ligne passe également sur Linux CPU avec la fixture du dépôt; la qualité sur corpus et le pic RSS à froid restent à mesurer.
 
 ## Conditions reproductibles
 
