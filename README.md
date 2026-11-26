@@ -116,6 +116,10 @@ tar -czf "pixelflow-backup-$(date +%F).tar.gz" data models docker/pixelflow.yaml
 
 Le [guide d’exploitation Docker](docs/deployment.md) décrit les montages, les permissions et le dépannage.
 
+### Envoyer une image par API ou formulaire web
+
+Le [connecteur HTTP facultatif](docs/http.md) permet d’envoyer une image, de suivre son traitement et de télécharger les variantes. Le dossier surveillé reste utilisable. Pour un accès distant, placer le connecteur derrière un proxy HTTPS et protéger les appels par un jeton.
+
 ## Utiliser le traitement local
 
 Utiliser Node.js 24 LTS (24.14.0 minimum) avec Corepack. Depuis la racine du dépôt, lancer les commandes suivantes. Corepack lit le champ `packageManager` pour sélectionner pnpm 10.34.9. Le premier téléchargement des outils nécessite un accès au registre npm.

@@ -1,6 +1,7 @@
 import PQueue from "p-queue";
 import pino from "pino";
 import type { BackgroundRemover } from "../application/background-remover.ts";
+import { readHttpSettings, runHttpConnector } from "./http-connector.ts";
 import { createPipelineRenderer } from "./sharp-pipeline.ts";
 import { loadWatchConfig } from "./watch-config.ts";
 import { runWatchFolders } from "./watch-folder.ts";
@@ -17,6 +18,8 @@ import { runWatchFolders } from "./watch-folder.ts";
 export async function runConfiguredWatch(file: string, shutdown: AbortSignal): Promise<void> {
   const { settings, pipelines } = await loadWatchConfig(file);
   if (shutdown.aborted) return;
+  const http = readHttpSettings(process.env);
+  const logger = pino({ level: settings.logLevel });
   const needsModel = pipelines.some(({ steps }) =>
     steps.some((step) => step.type === "remove-background"),
   );
@@ -37,9 +40,13 @@ export async function runConfiguredWatch(file: string, shutdown: AbortSignal): P
         render: createPipelineRenderer(steps, remove),
       })),
       settings.concurrency,
-      pino({ level: settings.logLevel }),
+      logger,
       shutdown,
       settings,
+      http
+        ? (journal, schedule, signal) =>
+            runHttpConnector(http, pipelines, journal, schedule, logger, signal)
+        : undefined,
     );
   } finally {
     await model?.close();

@@ -63,7 +63,7 @@ async function digest(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
-async function syncPath(path: string, flags: "r" | "r+"): Promise<void> {
+export async function syncPath(path: string, flags: "r" | "r+"): Promise<void> {
   const handle = await open(path, flags);
   try {
     await handle.sync();

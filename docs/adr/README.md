@@ -19,6 +19,7 @@ préférence qui ne contraint pas la suite du projet.
 - [ADR 0007 · Journal et reprise des jobs](0007-durable-watch-jobs.md)
 - [ADR 0008 · Image Docker et contrôle de fonctionnement](0008-container-runtime.md)
 - [ADR 0009 · Administration du journal](0009-journal-administration.md)
+- [ADR 0010 · Connecteur HTTP pour les pipelines](0010-http-connector.md)
 
 ## Format
 

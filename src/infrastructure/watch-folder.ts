@@ -108,6 +108,12 @@ type Reliability = Readonly<{
   scanIntervalSeconds: number;
 }>;
 
+type WatchCompanion = (
+  journal: JobJournal,
+  schedule: (scope: string, id: string) => void,
+  signal: AbortSignal,
+) => Promise<void>;
+
 /**
  * Prepares all storage adapters before opening watchers. One queue limits jobs across all inputs.
  *
@@ -116,6 +122,7 @@ type Reliability = Readonly<{
  * @param logger - Logger used for lifecycle and job events, scoped by pipeline when an ID is present.
  * @param shutdown - Signal to stop claiming deposits and let in-flight jobs finish.
  * @param reliability - Journal location, retry budget and periodic scan interval.
+ * @param companion - Optional ingress that shares the running watchers and journal.
  * @returns Resolves after all watchers have closed and job handling has settled.
  * @throws If storage setup fails or a watcher fails. A watcher failure stops the other watchers too.
  */
@@ -125,6 +132,7 @@ export async function runWatchFolders(
   logger: Logger,
   shutdown: AbortSignal,
   reliability: Reliability,
+  companion?: WatchCompanion,
 ): Promise<void> {
   if (shutdown.aborted) return;
   const { journal, close, checkWritable } = await openJobJournal(reliability.stateDirectory);
@@ -156,26 +164,34 @@ export async function runWatchFolders(
         })
       : undefined;
     try {
-      await Promise.all(
-        prepared.map(async ({ pipeline, storage }) => {
-          try {
-            const pipelineLogger = pipeline.id ? logger.child({ pipeline: pipeline.id }) : logger;
-            await watchPipeline(
-              pipeline,
-              storage,
-              queue,
-              pipelineLogger,
-              signal,
-              failure,
-              journal,
-              reliability,
-              health,
-            );
-          } catch (error) {
-            failure.abort(error);
-          }
-        }),
-      );
+      const schedulers = new Map<string, (id: string) => void>();
+      const watchers = prepared.map(async ({ pipeline, storage }) => {
+        try {
+          const pipelineLogger = pipeline.id ? logger.child({ pipeline: pipeline.id }) : logger;
+          await watchPipeline(
+            pipeline,
+            storage,
+            queue,
+            pipelineLogger,
+            signal,
+            failure,
+            journal,
+            reliability,
+            health,
+            (schedule) => schedulers.set(storage.input, schedule),
+          );
+        } catch (error) {
+          failure.abort(error);
+        }
+      });
+      if (companion && !signal.aborted) {
+        watchers.push(
+          companion(journal, (scope, id) => schedulers.get(scope)?.(id), signal).catch(
+            (error: unknown) => failure.abort(error),
+          ),
+        );
+      }
+      await Promise.all(watchers);
     } finally {
       await health?.close();
     }
@@ -202,6 +218,7 @@ async function watchPipeline(
   journal: JobJournal,
   { maxRetries, scanIntervalSeconds }: Reliability,
   health: WatchHealth | undefined,
+  registerScheduler: (schedule: (id: string) => void) => void,
 ): Promise<void> {
   const inputs = new Map<string, Promise<void>>();
   const jobs = new Map<string, Promise<void>>();
@@ -368,6 +385,7 @@ async function watchPipeline(
     if (path === input) failure.abort(new Error(`Input directory was removed: "${input}".`));
   });
 
+  registerScheduler(scheduleJob);
   const scanning = reconcile();
   await new Promise<void>((resolve) => {
     if (signal.aborted) resolve();

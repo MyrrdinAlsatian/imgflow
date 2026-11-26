@@ -1,5 +1,7 @@
 # Exploitation avec Docker Compose
 
+Pour activer l’envoi par API ou formulaire, suivre le [guide du connecteur HTTP](http.md). Compose reste sans réseau par défaut.
+
 Utiliser Docker Engine, BuildKit et le plugin Docker Compose v2 sur Linux amd64 ou arm64. L’image de base suit la branche Node 24 Bookworm slim. Pour mettre à jour cette image lors d’une reconstruction, lancer `docker compose build --pull`. [Image Node officielle](https://hub.docker.com/_/node) · [BuildKit](https://docs.docker.com/build/buildkit/)
 
 ## Préparer et démarrer

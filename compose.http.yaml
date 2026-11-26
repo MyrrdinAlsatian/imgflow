@@ -1,0 +1,8 @@
+services:
+  pixelflow:
+    network_mode: !reset null
+    environment:
+      PIXELFLOW_HTTP_HOST: "0.0.0.0"
+      PIXELFLOW_HTTP_TOKEN: "${PIXELFLOW_HTTP_TOKEN:?Set PIXELFLOW_HTTP_TOKEN (see docs/http.md)}"
+    ports:
+      - "127.0.0.1:${PIXELFLOW_HTTP_PORT:-8080}:8080"
