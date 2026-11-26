@@ -17,6 +17,7 @@ préférence qui ne contraint pas la suite du projet.
 - [ADR 0005 · Détourage local avec BEN2](0005-local-ben2.md)
 - [ADR 0006 · Pipelines déclaratives et publication par lot](0006-declarative-pipelines.md)
 - [ADR 0007 · Journal et reprise des jobs](0007-durable-watch-jobs.md)
+- [ADR 0008 · Image Docker et contrôle de fonctionnement](0008-container-runtime.md)
 
 ## Format
 

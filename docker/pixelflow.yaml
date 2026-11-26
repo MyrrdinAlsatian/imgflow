@@ -1,0 +1,19 @@
+version: 1
+settings:
+  stateDirectory: /data/state
+  modelCache: /models
+pipelines:
+  web:
+    watch: /data/input
+    processing: /data/processing
+    output: /data/output
+    archive: /data/archive
+    failed: /data/failed
+    steps:
+      - type: normalize
+      - type: resize
+        width: 1600
+        height: 1600
+      - type: export
+        variants:
+          - format: webp

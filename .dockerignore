@@ -1,0 +1,9 @@
+**
+!package.json
+!pnpm-lock.yaml
+!tsconfig.json
+!tsconfig.build.json
+!src/
+!src/**
+!docker/
+!docker/pixelflow.yaml

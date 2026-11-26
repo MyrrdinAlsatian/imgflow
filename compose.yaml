@@ -1,0 +1,32 @@
+services:
+  pixelflow:
+    build:
+      context: .
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 2m
+    network_mode: none
+    read_only: true
+    environment:
+      PIXELFLOW_HEALTH_MAX_JOB_SECONDS: "${PIXELFLOW_HEALTH_MAX_JOB_SECONDS:-900}"
+    tmpfs:
+      - /run/pixelflow:uid=1000,gid=1000,mode=0700
+      - /tmp:mode=1777
+    volumes:
+      - type: bind
+        source: "${PIXELFLOW_DATA_DIR:-./data}"
+        target: /data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${PIXELFLOW_MODELS_DIR:-./models}"
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${PIXELFLOW_CONFIG_FILE:-./docker/pixelflow.yaml}"
+        target: /etc/pixelflow/pipelines.yaml
+        read_only: true
+        bind:
+          create_host_path: false

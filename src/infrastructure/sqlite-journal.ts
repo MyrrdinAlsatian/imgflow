@@ -30,6 +30,8 @@ export async function openJobJournal(directory: string) {
     try {
       return {
         journal: createJournal(db),
+        /** Tests the live connection's ability to acquire a write transaction. */
+        checkWritable: () => db.exec("BEGIN IMMEDIATE; ROLLBACK"),
         close: () => {
           try {
             db.close();

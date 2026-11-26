@@ -75,6 +75,10 @@ Le détourage est activé par `--remove-background`. Le cache par défaut est `.
 
 Les mesures de temps et de mémoire se reproduisent avec `corepack pnpm bench:ben2 photo.jpg`. [Protocole et résultats](docs/benchmarks.md)
 
+## Déployer avec Docker Compose
+
+Sur Linux, Compose construit l’image, monte les données persistantes et démarre le service avec l’utilisateur `node`. La configuration fournie traite les dépôts dans `data/input` et publie les variantes WebP dans `data/output`. Le guide décrit les permissions, le cache BEN2, la vérification du service et la sauvegarde. [Guide d’exploitation](docs/deployment.md)
+
 ## Commandes de développement
 
 Utiliser `corepack pnpm <script>`, ou `pnpm <script>` si le lanceur pnpm utilise la version épinglée.

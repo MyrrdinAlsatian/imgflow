@@ -20,6 +20,8 @@ import {
 } from "./watch-files.ts";
 import type { WatchDirectories } from "./watch-files.ts";
 import { openJobJournal } from "./sqlite-journal.ts";
+import { startWatchHealth } from "./watch-health.ts";
+import type { WatchHealth } from "./watch-health.ts";
 
 /** Directory and conversion settings shared by all jobs in a watch session. */
 type WatchSettings = Pick<WebpRequest, "width" | "height" | "quality"> & {
@@ -125,7 +127,7 @@ export async function runWatchFolders(
   reliability: Reliability,
 ): Promise<void> {
   if (shutdown.aborted) return;
-  const { journal, close } = await openJobJournal(reliability.stateDirectory);
+  const { journal, close, checkWritable } = await openJobJournal(reliability.stateDirectory);
   try {
     journal.assertLayouts(
       new Map(pipelines.map(({ directories }) => [directories.input, JSON.stringify(directories)])),
@@ -141,25 +143,42 @@ export async function runWatchFolders(
     const failure = new AbortController();
     const signal = AbortSignal.any([shutdown, failure.signal]);
     const queue = new PQueue({ concurrency });
-    await Promise.all(
-      prepared.map(async ({ pipeline, storage }) => {
-        try {
-          const pipelineLogger = pipeline.id ? logger.child({ pipeline: pipeline.id }) : logger;
-          await watchPipeline(
-            pipeline,
-            storage,
-            queue,
-            pipelineLogger,
-            signal,
-            failure,
-            journal,
-            reliability,
-          );
-        } catch (error) {
-          failure.abort(error);
-        }
-      }),
-    );
+    const healthFile = process.env.PIXELFLOW_HEALTH_FILE;
+    const health = healthFile
+      ? startWatchHealth({
+          path: healthFile,
+          folders: pipelines.map(({ directories }) => directories),
+          stateDirectory: reliability.stateDirectory,
+          maxJobSeconds: Number(process.env.PIXELFLOW_HEALTH_MAX_JOB_SECONDS ?? 900),
+          checkJournal: checkWritable,
+          shutdown: signal,
+          onError: (error) => failure.abort(error),
+        })
+      : undefined;
+    try {
+      await Promise.all(
+        prepared.map(async ({ pipeline, storage }) => {
+          try {
+            const pipelineLogger = pipeline.id ? logger.child({ pipeline: pipeline.id }) : logger;
+            await watchPipeline(
+              pipeline,
+              storage,
+              queue,
+              pipelineLogger,
+              signal,
+              failure,
+              journal,
+              reliability,
+              health,
+            );
+          } catch (error) {
+            failure.abort(error);
+          }
+        }),
+      );
+    } finally {
+      await health?.close();
+    }
     if (failure.signal.aborted) throw failure.signal.reason;
   } finally {
     close();
@@ -175,6 +194,7 @@ async function watchPipeline(
   failure: AbortController,
   journal: JobJournal,
   { maxRetries, scanIntervalSeconds }: Reliability,
+  health: WatchHealth | undefined,
 ): Promise<void> {
   const inputs = new Map<string, Promise<void>>();
   const jobs = new Map<string, Promise<void>>();
@@ -251,7 +271,11 @@ async function watchPipeline(
       const record = journal.find(id);
       if (!record) return;
       if (record.retryAt && record.retryAt > Date.now()) await pause(record.retryAt - Date.now());
-      if (signal.aborted || !(await queue.add(() => advance(record)))) return;
+      if (
+        signal.aborted ||
+        !(await queue.add(() => (health ? health.track(() => advance(record)) : advance(record))))
+      )
+        return;
     }
   }
 
@@ -308,7 +332,9 @@ async function watchPipeline(
         for (const entry of await readdir(input, { withFileTypes: true })) {
           if (entry.isFile()) schedule(join(input, entry.name));
         }
+        health?.scanned(input, true);
       } catch (err) {
+        health?.scanned(input, false);
         logger.error({ input, err }, "Could not reconcile watch folder");
       }
       await pause(scanIntervalSeconds * 1000);
@@ -317,7 +343,10 @@ async function watchPipeline(
 
   watcher.on("add", schedule);
   watcher.on("change", schedule);
-  watcher.on("ready", () => logger.info({ input }, "Watch folder ready"));
+  watcher.on("ready", () => {
+    health?.ready(input);
+    logger.info({ input }, "Watch folder ready");
+  });
   watcher.on("error", (error) => failure.abort(error));
   watcher.on("unlinkDir", (path) => {
     if (path === input) failure.abort(new Error(`Input directory was removed: "${input}".`));
