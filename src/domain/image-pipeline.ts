@@ -1,3 +1,5 @@
+import type { AutoCropOptions } from "./auto-crop.ts";
+
 /** Output-specific maximum dimensions. Resizing preserves aspect ratio and never enlarges. */
 export type VariantResize = Readonly<{ width: number; height: number }>;
 
@@ -31,6 +33,7 @@ export type ImageVariant =
 export type PipelineStep =
   | Readonly<{ type: "normalize" }>
   | Readonly<{ type: "remove-background"; model: "ben2" }>
+  | (Readonly<{ type: "auto-crop" }> & AutoCropOptions)
   | Readonly<{ type: "trim"; padding: number }>
   | Readonly<{
       type: "resize";

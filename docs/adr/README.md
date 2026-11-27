@@ -20,6 +20,7 @@ préférence qui ne contraint pas la suite du projet.
 - [ADR 0008 · Image Docker et contrôle de fonctionnement](0008-container-runtime.md)
 - [ADR 0009 · Administration du journal](0009-journal-administration.md)
 - [ADR 0010 · Extraction de la couche domaine](0010-domain-layer.md)
+- [ADR 0011 · Recadrage automatique du sujet](0011-auto-crop.md)
 
 ## Format
 

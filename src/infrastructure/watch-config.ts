@@ -3,6 +3,12 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import * as v from "valibot";
 import { parse } from "yaml";
 import {
+  autoCropDefaults,
+  fitsImageCanvas,
+  maxAnalysisResolution,
+  reduceAspectRatio,
+} from "../domain/auto-crop.ts";
+import {
   blurSigmaRange,
   maxImageDimension,
   maxImagePixels,
@@ -26,6 +32,23 @@ const color = v.pipe(v.string(), v.regex(/^#[0-9a-f]{6}$/i, "Expected an opaque 
 const positive = v.pipe(v.number(), v.safeInteger(), v.minValue(1));
 const dimension = v.pipe(positive, v.maxValue(maxImageDimension));
 const quality = v.pipe(positive, v.maxValue(maxImageQuality));
+const proportion = v.pipe(v.number(), v.finite(), v.minValue(0), v.maxValue(1));
+const cropMargin = v.optional(proportion, autoCropDefaults.padding);
+const cropPadding = v.union([
+  proportion,
+  v.strictObject({ top: cropMargin, right: cropMargin, bottom: cropMargin, left: cropMargin }),
+]);
+const byte = v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(255));
+const backgroundColor = v.union([v.literal("transparent"), color]);
+const aspectRatio = v.pipe(
+  v.string(),
+  v.regex(/^[1-9][0-9]{0,4}:[1-9][0-9]{0,4}$/, "Expected a positive integer ratio such as 4:5."),
+  v.transform((value) => {
+    const [width, height] = value.split(":").map(Number);
+    return reduceAspectRatio(width!, height!);
+  }),
+  v.check(fitsImageCanvas, "The smallest canvas for this ratio exceeds the image limits."),
+);
 const name = v.optional(nameSchema, "image");
 const variantResize = v.strictObject({ width: dimension, height: dimension });
 const variantEffects = v.pipe(
@@ -89,15 +112,35 @@ const step = v.variant("type", [
   v.strictObject({ type: v.literal("normalize") }),
   v.strictObject({ type: v.literal("remove-background"), model: v.literal("ben2") }),
   v.strictObject({
+    type: v.literal("auto-crop"),
+    enabled: v.optional(v.boolean(), autoCropDefaults.enabled),
+    detectionMode: v.optional(
+      v.picklist(["alpha", "white", "auto"]),
+      autoCropDefaults.detectionMode,
+    ),
+    alphaThreshold: v.optional(v.pipe(byte, v.minValue(1)), autoCropDefaults.alphaThreshold),
+    colorTolerance: v.optional(byte, autoCropDefaults.colorTolerance),
+    aspectRatio: v.optional(aspectRatio, autoCropDefaults.aspectRatio),
+    padding: v.optional(cropPadding, autoCropDefaults.padding),
+    alignment: v.optional(v.picklist(["center", "top", "bottom"]), autoCropDefaults.alignment),
+    background: v.optional(backgroundColor, autoCropDefaults.background),
+    analysisResolution: v.optional(
+      v.pipe(positive, v.maxValue(maxAnalysisResolution)),
+      autoCropDefaults.analysisResolution,
+    ),
+    removeArtifacts: v.optional(v.boolean(), autoCropDefaults.removeArtifacts),
+    minComponentAreaRatio: v.optional(proportion, autoCropDefaults.minComponentAreaRatio),
+  }),
+  v.strictObject({
     type: v.literal("trim"),
-    padding: v.optional(v.pipe(v.number(), v.finite(), v.minValue(0), v.maxValue(1)), 0),
+    padding: v.optional(proportion, 0),
   }),
   v.strictObject({
     type: v.literal("resize"),
     width: dimension,
     height: dimension,
     fit: v.optional(v.picklist(["inside", "contain", "cover"]), "inside"),
-    background: v.optional(v.union([v.literal("transparent"), color]), "transparent"),
+    background: v.optional(backgroundColor, "transparent"),
   }),
   v.strictObject({
     type: v.literal("export"),

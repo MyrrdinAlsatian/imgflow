@@ -49,6 +49,12 @@ export async function readRgba(image: Sharp) {
   return { data, raw };
 }
 
+/** Completes pending operations so Sharp cannot reorder two configured steps. */
+export async function materialize(image: Sharp): Promise<Sharp> {
+  const { data, raw } = await readRgba(image);
+  return sharp(data, { raw });
+}
+
 /**
  * Runs inference on a bounded RGB frame, scales the mask back, and multiplies it with the
  * image's alpha so inference never makes a pixel more opaque.

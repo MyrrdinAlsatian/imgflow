@@ -119,6 +119,8 @@ Les identifiants de pipeline et les noms de variante acceptent jusqu’à 64 car
 
 Les étapes sont exécutées dans l’ordre du YAML. `normalize`, lorsqu’elle est présente, vient en premier. Chaque pipeline se termine par un seul `export`.
 
+L’étape [`auto-crop`](#recadrage-automatique-du-sujet) cadre le sujet avec un ratio et une marge, en agrandissant le canevas si nécessaire.
+
 | Étape               | Comportement                                                                                                                                                                                                                                                                                                                                       |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `normalize`         | Applique l’orientation EXIF. Les encodeurs retirent les métadonnées de la source.                                                                                                                                                                                                                                                                  |
@@ -140,6 +142,60 @@ Pour une variante, les opérations s’appliquent après les étapes communes, d
 Une clé inconnue, une étape mal placée ou une valeur invalide interrompt le démarrage avec le chemin du champ concerné, par exemple `pipelines.photos.steps[1].width`. Si un encodeur échoue, le service retire les variantes temporaires puis réessaie selon le budget. Lorsque le budget est épuisé, il conserve l’original et son diagnostic dans `failed/`.
 
 Conserver le même répertoire d’état et les mêmes chemins de pipeline tant que des jobs sont en cours. Lors d’une reprise, les nouvelles tentatives utilisent les étapes configurées au redémarrage. Exécuter un seul service par arborescence de données et par répertoire d’état. [Décision de persistance](adr/0007-durable-watch-jobs.md)
+
+## Recadrage automatique du sujet
+
+Ajouter `auto-crop` après `remove-background` et avant le redimensionnement final. Pour des images déjà transparentes ou prises sur fond blanc, l’étape fonctionne directement après `normalize`.
+
+```yaml
+steps:
+  - type: normalize
+  - type: remove-background
+    model: ben2
+  - type: auto-crop
+    aspectRatio: "4:5"
+    padding: 0.1
+  - type: resize
+    width: 1200
+    height: 1500
+    fit: inside
+  - type: export
+    variants:
+      - format: webp
+```
+
+| Paramètre               | Défaut        | Effet                                                                                                                                                                                                                                                                      |
+| ----------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`               | `true`        | Avec `false`, l’étape transmet l’image directement.                                                                                                                                                                                                                        |
+| `detectionMode`         | `auto`        | `alpha` détecte le sujet par opacité. `white` le détecte par écart au blanc en ignorant les pixels entièrement transparents. `auto` utilise l’alpha si au moins un pixel est sous le seuil d’opacité. Sinon, il utilise la détection du blanc.                             |
+| `alphaThreshold`        | `15`          | Opacité minimale incluse, de 1 à 255. Diminuez-la pour inclure des contours plus diffus dans la détection.                                                                                                                                                                 |
+| `colorTolerance`        | `20`          | Tolérance de 0 à 255 par canal RVB. Un pixel est considéré comme blanc si ses trois canaux sont supérieurs ou égaux à `255 - colorTolerance`.                                                                                                                              |
+| `aspectRatio`           | `"1:1"`       | Rapport largeur:hauteur donné sous forme de chaîne. Chaque terme est un entier positif de 1 à 99 999. Exemples `"4:5"`, `"16:9"`.                                                                                                                                          |
+| `padding`               | `0.1`         | Marge minimale de 0 à 1, commune aux quatre côtés ou définie avec `top`, `right`, `bottom` et `left`. Les côtés omis valent 0,1. Chaque marge est proportionnelle à l’axe correspondant du sujet détecté et arrondie au pixel supérieur.                                   |
+| `alignment`             | `center`      | Répartit l’espace vertical supplémentaire après application de la marge minimale. Avec `top`, cet espace est placé sous le sujet. Avec `bottom`, il est placé au-dessus. L’espace horizontal supplémentaire se répartit de part et d’autre du sujet et de ses marges.      |
+| `background`            | `transparent` | Couleur des pixels ajoutés hors de l’image d’origine. Accepte `transparent` ou une couleur `"#RRGGBB"`. Le fond déjà présent dans la zone conservée garde ses pixels.                                                                                                      |
+| `analysisResolution`    | `1024`        | Nombre maximal de cellules sur le côté long du masque d’analyse, de 1 à 2 048.                                                                                                                                                                                             |
+| `removeArtifacts`       | `true`        | Écarte du calcul du cadre les petites composantes isolées. Les pixels d’un artefact situé dans le cadre final restent visibles.                                                                                                                                            |
+| `minComponentAreaRatio` | `0.001`       | Surface minimale d’une composante en proportion du masque entier, de 0 à 1. Si aucune composante n’atteint ce seuil, la plus grande est retenue. En cas d’égalité, la première dans l’ordre de lecture est retenue. Avec `0`, toutes les composantes contribuent au cadre. |
+
+Pour définir une marge différente sur chaque côté, remplacer le nombre par un objet. Dans cet exemple, le bas reçoit une marge proportionnelle nulle et l’espace vertical ajouté pour respecter le ratio est placé au-dessus du sujet.
+
+```yaml
+- type: auto-crop
+  aspectRatio: "1:1"
+  alignment: bottom
+  padding:
+    top: 0.15
+    right: 0.05
+    bottom: 0
+    left: 0.1
+```
+
+Une cellule du masque est active dès qu’elle contient un pixel du sujet. Le filtrage examine les composantes connexes en incluant les diagonales et conserve l’union des composantes significatives. Les limites sont reportées dans l’image d’origine avec une cellule de sécurité de chaque côté, même si la marge configurée vaut zéro. Les pixels retenus, y compris semi-transparents, gardent leur résolution et leur opacité.
+
+Une image entièrement transparente ou sans sujet détecté poursuit la pipeline telle quelle. En mode `white`, une zone blanche isolée du sujet peut se confondre avec le fond. Un masque à faible résolution peut fusionner des composantes proches. Les contours diffus sous le seuil d’opacité peuvent être exclus s’ils dépassent la marge de sécurité et le cadre calculé.
+
+Le canevas respecte exactement le ratio demandé en pixels entiers. Si le ratio minimal ou le canevas requis dépasse 16 383 px par côté ou 64 millions de pixels, PixelFlow signale une erreur. Un redimensionnement ultérieur peut arrondir les dimensions au pixel. [Décision d’architecture](adr/0011-auto-crop.md)
 
 ## Consulter le journal
 

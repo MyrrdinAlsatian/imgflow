@@ -5,7 +5,8 @@ import type { BackgroundRemover } from "../application/background-remover.ts";
 import { variantFileName } from "../domain/image-pipeline.ts";
 import type { ImageVariant, PipelineStep } from "../domain/image-pipeline.ts";
 import type { JobRenderer, RenderedVariant } from "../application/process-watch-job.ts";
-import { applyForeground, openSharpImage, readRgba } from "./sharp-image.ts";
+import { autoCrop } from "./sharp-auto-crop.ts";
+import { applyForeground, materialize, openSharpImage, readRgba } from "./sharp-image.ts";
 
 type Transform = Exclude<PipelineStep, { type: "export" }>;
 type StepByType = { [Step in Transform as Step["type"]]: Step };
@@ -13,12 +14,6 @@ type StepByType = { [Step in Transform as Step["type"]]: Step };
 type StepRegistry = {
   [Name in keyof StepByType]: (image: Sharp, step: StepByType[Name]) => Promise<Sharp>;
 };
-
-/** Completes an operation before the next step so Sharp cannot reorder two configured steps. */
-async function materialize(image: Sharp): Promise<Sharp> {
-  const { data, raw } = await readRgba(image);
-  return sharp(data, { raw });
-}
 
 async function pixelate(image: Sharp, blockSize: number): Promise<Sharp> {
   const { data, raw } = await readRgba(image);
@@ -124,6 +119,7 @@ export function createPipelineRenderer(
       if (!remover) throw new Error("The BEN2 session is not available.");
       return applyForeground(image, remover);
     },
+    "auto-crop": autoCrop,
     trim: (image, { padding }) => trimForeground(image, padding),
     resize: (image, { width, height, fit, background }) =>
       materialize(

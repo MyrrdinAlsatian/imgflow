@@ -23,6 +23,8 @@ L’adaptateur BEN2 charge une session CPU depuis le cache local et la libère �
 
 Le chargeur YAML interprète une union discriminée d’étapes avec Valibot et vérifie les chemins avant de lancer les dossiers surveillés. Les types de pipeline sont indépendants des bibliothèques. L’adaptateur Sharp associe chaque transformation à une fonction dans un registre typé. Il termine chaque opération avant d’entamer la suivante pour respecter l’ordre du YAML.
 
+Pour `auto-crop`, le domaine détermine les limites du sujet à partir des pixels RGBA et calcule le cadre. Sharp fournit les pixels et applique la découpe et l’extension à la résolution d’origine de l’étape. [Recadrage automatique](adr/0011-auto-crop.md)
+
 Les dossiers partagent une file d’attente. Le port de stockage reçoit toutes les variantes à publier. Il renomme le répertoire temporaire seulement quand l’encodage du lot complet a réussi. [Décision d’architecture](adr/0006-declarative-pipelines.md)
 
 ## Journal et reprise en Phase 5
