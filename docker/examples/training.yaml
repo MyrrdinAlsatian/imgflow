@@ -1,0 +1,31 @@
+version: 1
+settings:
+  stateDirectory: /data/state
+pipelines:
+  training:
+    watch: /data/input
+    processing: /data/processing
+    output: /data/output
+    archive: /data/archive
+    failed: /data/failed
+    steps:
+      - type: normalize
+      - type: resize
+        width: 1920
+        height: 1920
+        fit: inside
+      - type: export
+        variants:
+          - format: png
+            name: lesson-detail
+          - format: webp
+            name: lesson-inline
+            quality: 92
+            resize:
+              width: 960
+              height: 960
+          - format: webp
+            name: lesson-thumbnail
+            resize:
+              width: 480
+              height: 480

@@ -58,6 +58,47 @@ pipelines:
           - format: png
 ```
 
+## Exemples pour Docker Compose
+
+| Configuration                                               | Usage                                                                                                                                                           | Fichiers dans `data/output/<id-de-job>/`                                           | Cache BEN2 |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ---------- |
+| [Images web](../docker/pixelflow.yaml)                      | Détourer une image, puis produire des miniatures et une variante floue et pixelisée.                                                                            | `image.webp`, `blurred-pixelated.webp`, `thumbnail-256.webp`, `thumbnail-512.webp` | Requis     |
+| [Réseaux sociaux](../docker/examples/social.yaml)           | Recadrer au centre pour remplir un carré de 1080 × 1080 px, puis en tirer une miniature.                                                                        | `social-square.jpg`, `thumbnail-320.webp`                                          | Facultatif |
+| [Catalogue produit](../docker/examples/catalog.yaml)        | Détourer le produit, resserrer le cadre autour du sujet, puis le centrer sur un carré de 1200 × 1200 px.                                                        | `product-transparent.png`, `product-white.jpg`, `thumbnail-320.avif`               | Requis     |
+| [Galerie photo](../docker/examples/gallery.yaml)            | Conserver le cadrage d’origine pour la vue agrandie (1 920 px max.), la grille (960 px max.) et la miniature (400 px max.).                                     | `lightbox.webp`, `gallery-960.webp`, `thumbnail-400.webp`                          | Non        |
+| [Diffusion vidéo](../docker/examples/video-thumbnails.yaml) | Recadrer une image de couverture en 16:9 pour obtenir une affiche de 1 280 × 720 px et des miniatures de 640 × 360 et 320 × 180 px.                             | `poster-1280.jpg`, `thumbnail-640.webp`, `thumbnail-320.webp`                      | Non        |
+| [Site de recettes](../docker/examples/recipes.yaml)         | Recadrer la photo du plat en 4:3 pour la fiche recette (1 200 × 900 px) et la carte du sommaire (600 × 450 px).                                                 | `recipe-hero.avif`, `recipe-hero.jpg`, `recipe-card.webp`                          | Non        |
+| [Site de formation](../docker/examples/training.yaml)       | Conserver tout le cadre d’une capture ou d’un schéma. Publier un PNG détaillé (1 920 px max.), un visuel de cours (960 px max.) et une miniature (480 px max.). | `lesson-detail.png`, `lesson-inline.webp`, `lesson-thumbnail.webp`                 | Non        |
+
+Pour la diffusion vidéo, déposer une image de couverture ou une image extraite en amont de la vidéo, au format JPEG, PNG ou WebP.
+
+Après avoir préparé les [répertoires hôte et leurs droits](deployment.md#préparer-et-démarrer), sélectionner un fichier depuis la racine du dépôt. Par exemple, sous un shell Linux :
+
+```sh
+export PIXELFLOW_CONFIG_FILE=./docker/examples/gallery.yaml
+docker compose up -d --build --force-recreate
+```
+
+Déposer les images dans `data/input/`. Le modèle doit être préparé pour les exemples qui utilisent BEN2. Pour les autres exemples, un dossier `models/` vide suffit au montage Compose. Pour valider un fichier avant de démarrer le service, utiliser `node dist/main.js admin validate <fichier.yaml>` après compilation.
+
+### Exécuter plusieurs pipelines en parallèle
+
+L’[exemple parallèle](../docker/examples/parallel.yaml) fait tourner la galerie photo et les miniatures vidéo dans le même service. Les deux pipelines partagent le journal et la limite globale de deux jobs simultanés (`settings.concurrency: 2`). Chaque pipeline a ses propres dossiers.
+
+Depuis la racine du dépôt, sélectionner ce YAML avec Compose :
+
+```sh
+export PIXELFLOW_CONFIG_FILE=./docker/examples/parallel.yaml
+docker compose up -d --build --force-recreate
+```
+
+| Dépôt sur l’hôte                                     | Lot publié sur l’hôte                       |
+| ---------------------------------------------------- | ------------------------------------------- |
+| Photo dans `data/input/gallery/`                     | `data/output/gallery/<id-de-job>/`          |
+| Couverture vidéo dans `data/input/video-thumbnails/` | `data/output/video-thumbnails/<id-de-job>/` |
+
+PixelFlow crée les sous-dossiers au démarrage. Si tu changes la configuration d’un service existant, laisse d’abord se terminer les jobs en cours.
+
 ## Réglages
 
 | Champ                          | Effet                                                                                                                                                              |

@@ -1,0 +1,27 @@
+version: 1
+settings:
+  stateDirectory: /data/state
+pipelines:
+  social:
+    watch: /data/input
+    processing: /data/processing
+    output: /data/output
+    archive: /data/archive
+    failed: /data/failed
+    steps:
+      - type: normalize
+      - type: resize
+        width: 1080
+        height: 1080
+        fit: cover
+      - type: export
+        variants:
+          - format: jpeg
+            name: social-square
+            quality: 88
+            background: "#ffffff"
+          - format: webp
+            name: thumbnail-320
+            resize:
+              width: 320
+              height: 320

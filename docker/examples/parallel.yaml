@@ -1,0 +1,59 @@
+version: 1
+settings:
+  stateDirectory: /data/state
+  concurrency: 2
+pipelines:
+  gallery:
+    watch: /data/input/gallery
+    processing: /data/processing/gallery
+    output: /data/output/gallery
+    archive: /data/archive/gallery
+    failed: /data/failed/gallery
+    steps:
+      - type: normalize
+      - type: resize
+        width: 1920
+        height: 1920
+        fit: inside
+      - type: export
+        variants:
+          - format: webp
+            name: lightbox
+            quality: 90
+          - format: webp
+            name: gallery-960
+            resize:
+              width: 960
+              height: 960
+          - format: webp
+            name: thumbnail-400
+            resize:
+              width: 400
+              height: 400
+  video-thumbnails:
+    watch: /data/input/video-thumbnails
+    processing: /data/processing/video-thumbnails
+    output: /data/output/video-thumbnails
+    archive: /data/archive/video-thumbnails
+    failed: /data/failed/video-thumbnails
+    steps:
+      - type: normalize
+      - type: resize
+        width: 1280
+        height: 720
+        fit: cover
+      - type: export
+        variants:
+          - format: jpeg
+            name: poster-1280
+            quality: 88
+          - format: webp
+            name: thumbnail-640
+            resize:
+              width: 640
+              height: 360
+          - format: webp
+            name: thumbnail-320
+            resize:
+              width: 320
+              height: 180

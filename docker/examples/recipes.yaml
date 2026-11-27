@@ -1,0 +1,29 @@
+version: 1
+settings:
+  stateDirectory: /data/state
+pipelines:
+  recipes:
+    watch: /data/input
+    processing: /data/processing
+    output: /data/output
+    archive: /data/archive
+    failed: /data/failed
+    steps:
+      - type: normalize
+      - type: resize
+        width: 1200
+        height: 900
+        fit: cover
+      - type: export
+        variants:
+          - format: avif
+            name: recipe-hero
+            quality: 70
+          - format: jpeg
+            name: recipe-hero
+            quality: 88
+          - format: webp
+            name: recipe-card
+            resize:
+              width: 600
+              height: 450

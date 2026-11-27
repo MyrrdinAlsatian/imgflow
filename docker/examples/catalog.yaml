@@ -1,0 +1,40 @@
+version: 1
+settings:
+  stateDirectory: /data/state
+  modelCache: /models
+pipelines:
+  catalog:
+    watch: /data/input
+    processing: /data/processing
+    output: /data/output
+    archive: /data/archive
+    failed: /data/failed
+    steps:
+      - type: normalize
+      - type: resize
+        width: 1600
+        height: 1600
+        fit: inside
+      - type: remove-background
+        model: ben2
+      - type: trim
+        padding: 0.05
+      - type: resize
+        width: 1200
+        height: 1200
+        fit: contain
+        background: transparent
+      - type: export
+        variants:
+          - format: png
+            name: product-transparent
+          - format: jpeg
+            name: product-white
+            quality: 88
+            background: "#ffffff"
+          - format: avif
+            name: thumbnail-320
+            quality: 65
+            resize:
+              width: 320
+              height: 320

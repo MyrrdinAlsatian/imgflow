@@ -173,6 +173,10 @@ node dist/main.js watch --config ./pixelflow.yaml
 
 Chaque dossier d’entrée applique ses propres étapes et peut publier des variantes WebP, AVIF, PNG et JPEG. Les chemins relatifs partent du répertoire du fichier YAML. Chaque lot apparaît dans le dossier de sortie une fois toutes ses variantes encodées. Une erreur dans le YAML indique le champ concerné avant le démarrage des dossiers surveillés.
 
+Pour Docker Compose, les [exemples de configuration](docs/configuration.md#exemples-pour-docker-compose) couvrent les galeries photo, les miniatures vidéo, les sites de recettes et de formation, ainsi que les images web, les réseaux sociaux et les catalogues produit.
+
+L’[exemple avec plusieurs pipelines](docs/configuration.md#exécuter-plusieurs-pipelines-en-parallèle) traite les photos et les couvertures vidéo depuis deux dossiers distincts dans le même service.
+
 ## Détourer une image avec BEN2
 
 Préparer le cache une fois sur une machine connectée. Cette commande télécharge l’export BEN2 FP16 épinglé (219 Mo) et vérifie la somme SHA-256 de chaque fichier. On peut ensuite copier le dossier `models/ben2/` sur une autre machine.

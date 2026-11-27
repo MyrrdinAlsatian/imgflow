@@ -1,0 +1,31 @@
+version: 1
+settings:
+  stateDirectory: /data/state
+pipelines:
+  video-thumbnails:
+    watch: /data/input
+    processing: /data/processing
+    output: /data/output
+    archive: /data/archive
+    failed: /data/failed
+    steps:
+      - type: normalize
+      - type: resize
+        width: 1280
+        height: 720
+        fit: cover
+      - type: export
+        variants:
+          - format: jpeg
+            name: poster-1280
+            quality: 88
+          - format: webp
+            name: thumbnail-640
+            resize:
+              width: 640
+              height: 360
+          - format: webp
+            name: thumbnail-320
+            resize:
+              width: 320
+              height: 180
