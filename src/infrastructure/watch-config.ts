@@ -110,6 +110,47 @@ const variant = v.variant("format", [
 
 const step = v.variant("type", [
   v.strictObject({ type: v.literal("normalize") }),
+  v.strictObject({
+    type: v.literal("copyright"),
+    text: v.pipe(
+      v.string(),
+      v.trim(),
+      v.minLength(1),
+      v.check(
+        (text) =>
+          Array.from(text).every((character) => {
+            const code = character.codePointAt(0) ?? 0;
+
+            return (
+              code === 9 ||
+              code === 10 ||
+              code === 13 ||
+              (code >= 32 && code <= 0xd7ff) ||
+              (code >= 0xe000 && code <= 0xfffd) ||
+              code >= 0x10000
+            );
+          }),
+        "Expected text that can be stored in XMP.",
+      ),
+    ),
+  }),
+  v.strictObject({
+    type: v.literal("watermark"),
+    image: pathSchema,
+    position: v.optional(
+      v.picklist(["top-left", "top-right", "bottom-left", "bottom-right", "center"]),
+      "bottom-right",
+    ),
+    widthRatio: v.optional(
+      v.pipe(
+        proportion,
+        v.check((value) => value > 0, "Expected a positive width ratio."),
+      ),
+      0.2,
+    ),
+    opacity: v.optional(proportion, 0.8),
+    margin: v.optional(v.pipe(v.number(), v.safeInteger(), v.minValue(0)), 12),
+  }),
   v.strictObject({ type: v.literal("remove-background"), model: v.literal("ben2") }),
   v.strictObject({
     type: v.literal("auto-crop"),
@@ -311,7 +352,16 @@ export async function loadWatchConfig(file: string) {
         archive: resolve(base, directoryFields.archive),
         failed: resolve(base, directoryFields.failed),
       };
-      pipelines.push({ id, steps, directories });
+
+      pipelines.push({
+        id,
+        steps: steps.map((current) =>
+          current.type === "watermark"
+            ? { ...current, image: resolve(base, current.image) }
+            : current,
+        ),
+        directories,
+      });
     }
     return {
       settings: {

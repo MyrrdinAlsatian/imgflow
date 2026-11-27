@@ -143,6 +143,25 @@ Une clé inconnue, une étape mal placée ou une valeur invalide interrompt le d
 
 Conserver le même répertoire d’état et les mêmes chemins de pipeline tant que des jobs sont en cours. Lors d’une reprise, les nouvelles tentatives utilisent les étapes configurées au redémarrage. Exécuter un seul service par arborescence de données et par répertoire d’état. [Décision de persistance](adr/0007-durable-watch-jobs.md)
 
+## Copyright et filigrane
+
+Ajouter ces étapes avant `export`, après les recadrages et redimensionnements communs.
+
+```yaml
+- type: copyright
+  text: "© 2026 Atelier Exemple"
+- type: watermark
+  image: ./logo.png
+  position: bottom-right
+  widthRatio: 0.2
+  opacity: 0.8
+  margin: 12
+```
+
+- `copyright` ajoute la mention dans le champ XMP `dc:rights` de chaque variante PNG, WebP, JPEG ou AVIF. Elle reste disponible après les transformations. Si plusieurs mentions sont configurées, la dernière s’applique.
+- `watermark` incruste un logo PNG, WebP ou JPEG. Le chemin est relatif au fichier YAML. Les positions possibles sont `top-left`, `top-right`, `bottom-left`, `bottom-right` et `center`. La largeur relative est strictement positive, au plus `1`. L’opacité va de `0` à `1` et la marge est exprimée en pixels. Les valeurs montrées sont celles par défaut. Le logo conserve ses proportions et sa transparence, et son cadre s’adapte aux petites images.
+- Les redimensionnements et effets propres aux variantes s’appliquent ensuite à l’image filigranée. Une opacité de `0` désactive le filigrane.
+
 ## Recadrage automatique du sujet
 
 Ajouter `auto-crop` après `remove-background` et avant le redimensionnement final. Pour des images déjà transparentes ou prises sur fond blanc, l’étape fonctionne directement après `normalize`.

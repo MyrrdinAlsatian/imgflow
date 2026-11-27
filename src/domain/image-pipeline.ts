@@ -35,6 +35,15 @@ export type PipelineStep =
   | Readonly<{ type: "remove-background"; model: "ben2" }>
   | (Readonly<{ type: "auto-crop" }> & AutoCropOptions)
   | Readonly<{ type: "trim"; padding: number }>
+  | Readonly<{ type: "copyright"; text: string }>
+  | Readonly<{
+      type: "watermark";
+      image: string;
+      position: "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center";
+      widthRatio: number;
+      opacity: number;
+      margin: number;
+    }>
   | Readonly<{
       type: "resize";
       width: number;

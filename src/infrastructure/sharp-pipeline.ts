@@ -8,7 +8,7 @@ import type { JobRenderer, RenderedVariant } from "../application/process-watch-
 import { autoCrop } from "./sharp-auto-crop.ts";
 import { applyForeground, materialize, openSharpImage, readRgba } from "./sharp-image.ts";
 
-type Transform = Exclude<PipelineStep, { type: "export" }>;
+type Transform = Exclude<PipelineStep, { type: "export" | "copyright" }>;
 type StepByType = { [Step in Transform as Step["type"]]: Step };
 /** Maps each transformation kind to a handler with the corresponding validated options. */
 type StepRegistry = {
@@ -92,6 +92,59 @@ function encode(image: Sharp, variant: ImageVariant): Sharp {
   }
 }
 
+/** Encodes a UTF-8 copyright notice without carrying over the source image's metadata. */
+function copyrightXmp(text: string): string {
+  const escaped = text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+  return `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:rights><rdf:Alt><rdf:li xml:lang="x-default">${escaped}</rdf:li></rdf:Alt></dc:rights></rdf:Description></rdf:RDF></x:xmpmeta>`;
+}
+
+/** Blends a proportionally sized logo into the current frame using its existing alpha. */
+async function watermark(image: Sharp, step: StepByType["watermark"]): Promise<Sharp> {
+  if (step.opacity === 0) return image;
+
+  const frame = await readRgba(image);
+  const { width, height } = frame.raw;
+  const margin = Math.min(step.margin, Math.floor((Math.min(width, height) - 1) / 2));
+  const logo = await openSharpImage(step.image);
+
+  const overlay = await readRgba(
+    logo
+      .autoOrient()
+      .resize(
+        Math.min(width - 2 * margin, Math.max(1, Math.round(width * step.widthRatio))),
+        height - 2 * margin,
+        { fit: "inside" },
+      ),
+  );
+
+  for (let offset = 3; offset < overlay.data.length; offset += 4) {
+    overlay.data.writeUInt8(Math.round(overlay.data.readUInt8(offset) * step.opacity), offset);
+  }
+
+  const remainingWidth = width - overlay.raw.width;
+  const remainingHeight = height - overlay.raw.height;
+  const centered = step.position === "center";
+
+  const left = centered
+    ? Math.floor(remainingWidth / 2)
+    : step.position.endsWith("left")
+      ? margin
+      : remainingWidth - margin;
+
+  const top = centered
+    ? Math.floor(remainingHeight / 2)
+    : step.position.startsWith("top")
+      ? margin
+      : remainingHeight - margin;
+
+  return materialize(
+    sharp(frame.data, { raw: frame.raw }).composite([
+      { input: overlay.data, raw: overlay.raw, left, top },
+    ]),
+  );
+}
+
 function applyStep<Name extends keyof StepByType>(
   registry: StepRegistry,
   image: Sharp,
@@ -114,6 +167,7 @@ export function createPipelineRenderer(
   remover?: BackgroundRemover,
 ): JobRenderer {
   const registry: StepRegistry = {
+    watermark,
     normalize: (image) => materialize(image.autoOrient()),
     "remove-background": (image) => {
       if (!remover) throw new Error("The BEN2 session is not available.");
@@ -133,8 +187,15 @@ export function createPipelineRenderer(
 
   return async (inputPath, staging) => {
     let image = await openSharpImage(inputPath);
+    let xmp: string | undefined;
+
     for (const [index, step] of steps.entries()) {
       try {
+        if (step.type === "copyright") {
+          xmp = copyrightXmp(step.text);
+          continue;
+        }
+
         if (step.type !== "export") {
           image = await applyStep(registry, image, step);
           continue;
@@ -152,6 +213,8 @@ export function createPipelineRenderer(
             );
           }
           try {
+            if (xmp !== undefined) transformed.withXmp(xmp);
+
             const { width, height } = await encode(transformed, variant).toFile(
               join(staging, name),
             );
