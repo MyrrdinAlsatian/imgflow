@@ -13,6 +13,8 @@ import type { JobRenderer } from "../application/process-watch-job.ts";
 import type { WebpSettings } from "../domain/image.ts";
 import { defaultMaxRetries, defaultScanIntervalSeconds } from "../domain/job.ts";
 import type { JobRecord } from "../domain/job.ts";
+import { startJobHttp } from "./job-http.ts";
+import type { HttpSettings } from "./job-http.ts";
 import {
   fileSignature,
   openWatchStorage,
@@ -41,6 +43,7 @@ type WatchSettings = WebpSettings & {
  */
 async function waitForStableFile(path: string, delay: number, signal: AbortSignal) {
   let before = await readFileStamp(path);
+  
   while (before && !signal.aborted) {
     try {
       await setTimeout(delay, undefined, { signal });
@@ -48,10 +51,13 @@ async function waitForStableFile(path: string, delay: number, signal: AbortSigna
       if (signal.aborted) return undefined;
       throw error;
     }
+  
     const after = await readFileStamp(path);
+  
     if (sameFile(before, after)) return before;
     before = after;
   }
+  
   return undefined;
 }
 
@@ -75,8 +81,10 @@ export function runWatchFolder(
     const name = "image.webp";
     const outputPath = join(staging, name);
     const dimensions = await processImage({ ...settings, inputPath, outputPath }, convert);
+  
     return [{ name, dimensions }];
   };
+  
   return runWatchFolders(
     [
       {
@@ -99,6 +107,7 @@ export function runWatchFolder(
 /** A non-recursive input folder, its work directories and its renderer. */
 type WatchPipeline = Readonly<{
   id?: string;
+  outputNames?: readonly string[];
   directories: WatchDirectories;
   stabilityMs: number;
   render: JobRenderer;
@@ -108,6 +117,7 @@ type Reliability = Readonly<{
   stateDirectory: string;
   maxRetries: number;
   scanIntervalSeconds: number;
+  http?: HttpSettings | undefined;
 }>;
 
 /**
@@ -129,25 +139,74 @@ export async function runWatchFolders(
   reliability: Reliability,
 ): Promise<void> {
   if (shutdown.aborted) return;
-  const { journal, close, checkWritable } = await openJobJournal(reliability.stateDirectory);
+
+  const { journal, close, checkWritable, estimateProcessingMs } = await openJobJournal(
+    reliability.stateDirectory,
+  );
+  
   try {
     journal.assertLayouts(
       new Map(pipelines.map(({ directories }) => [directories.input, JSON.stringify(directories)])),
     );
+  
     const prepared = await Promise.all(
       pipelines.map(async (pipeline) => ({
         pipeline,
         storage: await openWatchStorage(pipeline.directories),
       })),
     );
+  
     if (shutdown.aborted) return;
 
     const failure = new AbortController();
     const signal = AbortSignal.any([shutdown, failure.signal]);
     const queue = new PQueue({ concurrency });
-    const healthFile = process.env.PIXELFLOW_HEALTH_FILE;
-    const health = healthFile
-      ? startWatchHealth({
+    const schedules = new Map<string, (id: string) => void>();
+
+    const http = reliability.http
+      ? await startJobHttp(
+          reliability.http,
+          prepared.flatMap(({ pipeline, storage }) => {
+            const { id, outputNames, directories } = pipeline;
+
+            if (!id || !outputNames) return [];
+
+            return [
+              {
+                id,
+                scope: directories.input,
+                output: directories.output,
+                outputNames,
+                async submit(name: string, data: Buffer): Promise<JobRecord> {
+                  const job = { id: randomUUID(), name, scope: directories.input };
+
+                  await storage.storeUpload(job, data);
+
+                  // The periodic scan can adopt the original as soon as its directory is visible.
+                  const record =
+                    journal.find(job.id) ?? journal.add(job, JSON.stringify(directories), null);
+
+                  schedules.get(job.scope)?.(job.id);
+
+                  return record;
+                },
+              },
+            ];
+          }),
+          journal.find,
+          estimateProcessingMs,
+          logger,
+          signal,
+        )
+      : undefined;
+  
+      const healthFile = process.env.PIXELFLOW_HEALTH_FILE;
+
+    let health: WatchHealth | undefined;
+
+    try {
+      if (healthFile) {
+        health = startWatchHealth({
           path: healthFile,
           folders: pipelines.map(({ directories }) => directories),
           stateDirectory: reliability.stateDirectory,
@@ -155,9 +214,9 @@ export async function runWatchFolders(
           checkJournal: checkWritable,
           shutdown: signal,
           onError: (error) => failure.abort(error),
-        })
-      : undefined;
-    try {
+        });
+      }
+  
       await Promise.all(
         prepared.map(async ({ pipeline, storage }) => {
           try {
@@ -172,6 +231,7 @@ export async function runWatchFolders(
               journal,
               reliability,
               health,
+              schedules,
             );
           } catch (error) {
             failure.abort(error);
@@ -179,8 +239,9 @@ export async function runWatchFolders(
         }),
       );
     } finally {
-      await health?.close();
+      await Promise.all([health?.close(), http?.close()]);
     }
+  
     if (failure.signal.aborted) throw failure.signal.reason;
   } finally {
     close();
@@ -204,15 +265,19 @@ async function watchPipeline(
   journal: JobJournal,
   { maxRetries, scanIntervalSeconds }: Reliability,
   health: WatchHealth | undefined,
+  schedules: Map<string, (id: string) => void>,
 ): Promise<void> {
   const inputs = new Map<string, Promise<void>>();
   const jobs = new Map<string, Promise<void>>();
   const changed = new Set<string>();
   const layout = JSON.stringify(directories);
+  
   const ignored = (path: string) => {
     const name = basename(path).toLowerCase();
+  
     return name.startsWith(".") || name.endsWith(".part") || name.endsWith(".tmp");
   };
+  
   const watcher = watch(input, {
     depth: 0,
     followSymlinks: false,
@@ -231,26 +296,34 @@ async function watchPipeline(
   async function advance(record: JobRecord): Promise<boolean> {
     if (signal.aborted) return false;
     const job = claimed(record);
+  
     if (record.status === "claiming") {
       if (!(await claim(record))) {
         journal.set(record, "cancelled", "The deposit changed before the claim completed.");
         schedule(join(input, record.name));
+  
         return false;
       }
+  
       journal.set(record, "pending");
       record = { ...record, status: "pending" };
       logger.info({ jobId: job.id, name: job.name, originalPath: job.path }, "Image claimed");
     }
+  
     if (record.status === "pending") {
       const previous = journal.retrySource(job.id);
+  
       if (previous && !(await restoreRetry(job, previous))) {
         const message = "The retained original is unavailable for this manual retry.";
         journal.set(record, "cancelled", message);
         logger.warn({ jobId: job.id, retryOf: previous.id }, message);
+  
         return false;
       }
     }
+  
     const result = await processWatchJob(record, job, render, storage, journal, maxRetries);
+  
     if (result.status === "retry") {
       logger.warn(
         {
@@ -261,8 +334,10 @@ async function watchPipeline(
         },
         "Image retry scheduled",
       );
+  
       return true;
     }
+  
     if (result.status === "failed") {
       logger.warn(
         { jobId: job.id, failedPath: result.failedPath, err: result.error },
@@ -280,6 +355,7 @@ async function watchPipeline(
         "Image completed",
       );
     }
+  
     return false;
   }
 
@@ -287,8 +363,11 @@ async function watchPipeline(
   async function drive(id: string): Promise<void> {
     while (!signal.aborted) {
       const record = journal.find(id);
+  
       if (!record) return;
+  
       if (record.retryAt && record.retryAt > Date.now()) await pause(record.retryAt - Date.now());
+  
       if (
         signal.aborted ||
         !(await queue.add(() => (health ? health.track(() => advance(record)) : advance(record))))
@@ -299,21 +378,27 @@ async function watchPipeline(
 
   function scheduleJob(id: string): void {
     if (signal.aborted || jobs.has(id)) return;
+  
     const task = drive(id)
       .catch((err: unknown) => logger.error({ jobId: id, err }, "Could not finalize image job"))
       .finally(() => jobs.delete(id));
-    jobs.set(id, task);
+  
+      jobs.set(id, task);
   }
 
   /** Records a stable input before any move. Reuses an outstanding claim for that filename. */
   async function admit(path: string): Promise<void> {
     const stamp = await waitForStableFile(path, stabilityMs, signal);
+  
     if (!stamp || signal.aborted) return;
+  
     const name = basename(path);
+  
     const record =
       journal.claiming(input, name) ??
       journal.add({ id: randomUUID(), name, scope: input }, layout, fileSignature(stamp));
-    scheduleJob(record.id);
+  
+      scheduleJob(record.id);
   }
 
   /**
@@ -322,17 +407,22 @@ async function watchPipeline(
    */
   function schedule(path: string): void {
     if (signal.aborted || ignored(path)) return;
+  
     if (inputs.has(path)) {
       changed.add(path);
+  
       return;
     }
+  
     const task = admit(path)
       .catch((err: unknown) => logger.error({ path, err }, "Could not claim input file"))
       .finally(() => {
         inputs.delete(path);
+  
         if (changed.delete(path)) schedule(path);
       });
-    inputs.set(path, task);
+  
+      inputs.set(path, task);
   }
 
   /**
@@ -344,17 +434,22 @@ async function watchPipeline(
       try {
         for (const job of await recoverableJobs()) {
           if (signal.aborted) return;
+  
           if (!journal.find(job.id)) journal.add(job, layout, null);
         }
+  
         for (const job of journal.unfinished(input)) scheduleJob(job.id);
+  
         for (const entry of await readdir(input, { withFileTypes: true })) {
           if (entry.isFile()) schedule(join(input, entry.name));
         }
+  
         health?.scanned(input, true);
       } catch (err) {
         health?.scanned(input, false);
         logger.error({ input, err }, "Could not reconcile watch folder");
       }
+  
       await pause(scanIntervalSeconds * 1000);
     }
   }
@@ -370,16 +465,19 @@ async function watchPipeline(
     if (path === input) failure.abort(new Error(`Input directory was removed: "${input}".`));
   });
 
+  schedules.set(input, scheduleJob);
   const scanning = reconcile();
   await new Promise<void>((resolve) => {
     if (signal.aborted) resolve();
     else signal.addEventListener("abort", () => resolve(), { once: true });
   });
   logger.info({ input }, "Stopping watch folder");
+  
   try {
     await watcher.close();
   } finally {
     await Promise.all([scanning, ...inputs.values(), ...jobs.values()]);
   }
+  
   logger.info({ input }, "Watch folder stopped");
 }

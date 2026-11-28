@@ -22,6 +22,7 @@ préférence qui ne contraint pas la suite du projet.
 - [ADR 0010 · Extraction de la couche domaine](0010-domain-layer.md)
 - [ADR 0011 · Recadrage automatique du sujet](0011-auto-crop.md)
 - [ADR 0012 · Copyright et filigrane](0012-image-branding.md)
+- [ADR 0013 · API HTTP des jobs](0013-http-jobs.md)
 
 ## Format
 

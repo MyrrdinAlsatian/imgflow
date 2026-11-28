@@ -1,12 +1,12 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import * as v from "valibot";
 import type { JobJournal } from "../application/job-journal.ts";
 import type { JobRecord } from "../domain/job.ts";
 
 const active = "status NOT IN ('completed', 'failed', 'cancelled')";
-const fields =
-  "id, name, scope, signature, status, attempts, retry_at AS retryAt, last_error AS error";
+const fields = "id, name, scope, signature, status, attempts, retry_at AS retryAt, last_error AS error";
 
 /**
  * Opens the history database and reserves the state directory for one running service.
@@ -20,17 +20,39 @@ export async function openJobJournal(directory: string) {
   await mkdir(directory, { recursive: true });
   // A separate SQLite file provides an OS-released service lock without blocking history readers.
   const lock = new DatabaseSync(join(directory, "service-lock.sqlite"));
+  
   try {
+
     lock.exec("BEGIN EXCLUSIVE");
   } catch (error) {
     lock.close();
     throw new Error(`Cannot lock PixelFlow state directory "${directory}".`, { cause: error });
   }
+
   try {
     const db = openJournalDatabase(directory, false);
+  
     try {
+      const journal = createJournal(db);
+
+      const duration = db.prepare(`
+        SELECT AVG(elapsed) AS estimate FROM (
+          SELECT attempts.finished_at - attempts.started_at AS elapsed
+          FROM jobs JOIN job_attempts AS attempts ON attempts.job_id = jobs.id
+          WHERE jobs.scope = ? AND attempts.outcome = 'published'
+          ORDER BY attempts.finished_at DESC
+          LIMIT 20
+        )
+      `);
+  
       return {
-        journal: createJournal(db),
+        journal,
+        /** Estimates render duration from recent successful attempts in the same pipeline. */
+        estimateProcessingMs: (scope: string): number | null => {
+          const estimate = duration.get(scope)?.estimate;
+
+          return v.is(v.number(), estimate) ? Math.max(1, Math.round(estimate)) : null;
+        },
         /** Tests the live connection's ability to acquire a write transaction. */
         checkWritable: () => db.exec("BEGIN IMMEDIATE; ROLLBACK"),
         close: () => {
@@ -60,8 +82,10 @@ export async function openJobJournal(directory: string) {
  */
 export function openJournalDatabase(directory: string, readOnly: boolean): DatabaseSync {
   const db = new DatabaseSync(join(directory, "jobs.sqlite"), { readOnly });
+  
   try {
     db.exec("PRAGMA busy_timeout = 2000");
+  
     return db;
   } catch (error) {
     db.close();
@@ -89,9 +113,11 @@ export function ensureRetryTable(db: DatabaseSync): void {
  */
 export function writeJournal<T>(db: DatabaseSync, run: () => T): T {
   db.exec("BEGIN IMMEDIATE");
+  
   try {
     const result = run();
     db.exec("COMMIT");
+  
     return result;
   } catch (error) {
     if (db.isTransaction) db.exec("ROLLBACK");
@@ -119,54 +145,73 @@ function createJournal(db: DatabaseSync): JobJournal {
     ) STRICT;
   `);
   ensureRetryTable(db);
+  
   const insert = db.prepare(`INSERT INTO jobs
     (id, scope, name, layout, signature, status, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+  
   const find = db.prepare(`SELECT ${fields} FROM jobs WHERE id = ?`);
+  
   const retrySource = db.prepare(`
     SELECT source.id, source.name, source.scope
     FROM manual_retries AS retry JOIN jobs AS source ON source.id = retry.source_job_id
     WHERE retry.job_id = ?
   `);
+  
   const findClaim = db.prepare(
     `SELECT ${fields} FROM jobs WHERE scope = ? AND name = ? AND status = 'claiming'`,
   );
+  
   const unfinished = db.prepare(
     `SELECT ${fields} FROM jobs WHERE scope = ? AND ${active} ORDER BY created_at, id`,
   );
+  
   const layouts = db.prepare(`SELECT DISTINCT scope, layout FROM jobs WHERE ${active}`);
+  
   const set =
     db.prepare(`UPDATE jobs SET status = ?, retry_at = NULL, last_error = ?, result_path = ?,
     output_path = COALESCE(?, output_path), updated_at = ? WHERE id = ?`);
-  const start = db.prepare(
+  
+    const start = db.prepare(
     `UPDATE jobs SET status = 'running', attempts = ?, retry_at = NULL, updated_at = ? WHERE id = ?`,
   );
+
   const addAttempt = db.prepare(
     `INSERT INTO job_attempts (job_id, number, started_at) VALUES (?, ?, ?)`,
   );
+
   const endAttempt = db.prepare(
     `UPDATE job_attempts SET outcome = ?, error = ?, finished_at = ? WHERE job_id = ? AND number = ?`,
   );
+
   const end = db.prepare(
     `UPDATE jobs SET status = ?, last_error = ?, retry_at = ?, updated_at = ? WHERE id = ?`,
   );
 
   // The strict table and the shared SELECT projection define the record shape.
+  // SAFETY: SQLite's shared projection contains exactly the fields required by JobRecord.
   const read = (id: string) => find.get(id) as JobRecord | undefined;
+  
   return {
     add(job, layout, signature) {
       const status = signature === null ? "pending" : "claiming";
       const now = Date.now();
       insert.run(job.id, job.scope, job.name, layout, signature, status, now, now);
+  
       return { ...job, signature, status, attempts: 0, retryAt: null, error: null };
     },
     find: read,
+    // SAFETY: The join selects the source job's id, name, and scope, and a source_job_id lookup yields at most one retry lineage row.
     retrySource: (id) => retrySource.get(id) as ReturnType<JobJournal["retrySource"]>,
+    // SAFETY: The claim query filters by scope and name and returns only one row; shared fields match JobRecord.
     claiming: (scope, name) => findClaim.get(scope, name) as JobRecord | undefined,
+    // SAFETY: The scope-filtered shared projection contains exactly the fields required by JobRecord.
     unfinished: (scope) => unfinished.all(scope) as JobRecord[],
     assertLayouts(available) {
-      for (const row of layouts.all()) {
-        if (typeof row.scope !== "string" || available.get(row.scope) !== row.layout) {
+      for (const result of layouts.all()) {
+        const row = v.parse(v.object({ scope: v.string(), layout: v.string() }), result);
+
+        if (available.get(row.scope) !== row.layout) {
           throw new Error(
             `Unfinished jobs use a different directory layout for "${row.scope}". Restore that layout to resume them.`,
           );
@@ -190,6 +235,7 @@ function createJournal(db: DatabaseSync): JobJournal {
         start.run(attempts, now, job.id);
         addAttempt.run(job.id, attempts, now);
       });
+
       return { ...job, attempts, status: "running", retryAt: null };
     },
     finishAttempt(job, outcome, status, error, retryAt) {

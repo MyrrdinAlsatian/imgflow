@@ -58,6 +58,96 @@ pipelines:
           - format: png
 ```
 
+## API HTTP des jobs
+
+Pour accepter des images par HTTP, ajoute ce bloc sous `settings` dans le YAML du
+service `watch --config`. Le bloc est facultatif et toutes ses valeurs ci-dessous
+sont les valeurs par défaut.
+
+```yaml
+settings:
+  http:
+    host: 127.0.0.1
+    port: 8080
+    maxUploadBytes: 20971520
+```
+
+Le service accepte `127.0.0.1`, `::1`, `0.0.0.0` et `::`. Les adresses
+`0.0.0.0` et `::` exigent la variable d’environnement `PIXELFLOW_HTTP_TOKEN`.
+Si elle est définie, chaque requête doit envoyer `Authorization: Bearer <jeton>`.
+Le jeton donne accès aux pipelines et aux jobs de toute l’instance. Pour un
+accès distant, termine HTTPS au niveau d’un proxy inverse. Le Compose fourni
+isole le réseau du conteneur. Les exemples suivants utilisent le service
+lancé directement sur l’hôte.
+
+### Envoyer une image
+
+`POST /pipelines/{pipelineId}/jobs` reçoit le fichier binaire dans le corps
+de la requête. Indique `image/jpeg`, `image/png` ou `image/webp` dans
+`Content-Type`. PixelFlow vérifie la taille, le format déclaré, la limite
+de 64 millions de pixels et le décodage de l’image fixe. Il conserve
+l’original sous `image.jpg`, `image.png` ou
+`image.webp` selon son format. La limite configurable du corps est comprise
+entre 1 octet et 100 Mio.
+
+```sh
+curl -i http://127.0.0.1:8080/pipelines/photos/jobs \
+  -H "Content-Type: image/jpeg" --data-binary @photo.jpg
+```
+
+Le service répond `202 Accepted` après avoir stocké l’image et enregistré
+le job. L’en-tête `Location` reprend l’URL de suivi. Exemple pour un
+pipeline qui exporte `image.webp` et `preview.jpg`.
+
+```json
+{
+  "jobId": "de4d6520-c804-46bb-812e-e221108c9cf9",
+  "status": "pending",
+  "statusUrl": "/jobs/de4d6520-c804-46bb-812e-e221108c9cf9",
+  "estimatedProcessingMs": 180,
+  "outputs": [
+    {
+      "name": "image.webp",
+      "url": "/jobs/de4d6520-c804-46bb-812e-e221108c9cf9/outputs/image.webp"
+    },
+    {
+      "name": "preview.jpg",
+      "url": "/jobs/de4d6520-c804-46bb-812e-e221108c9cf9/outputs/preview.jpg"
+    }
+  ]
+}
+```
+
+`estimatedProcessingMs` est la moyenne des 20 derniers rendus réussis
+du pipeline, ou de tous les rendus réussis si leur nombre est inférieur.
+La valeur est `null` au premier envoi si le pipeline n’a aucun historique
+de réussite. Elle couvre le rendu et la publication du lot. L’attente
+en file, les nouvelles tentatives et l’archivage ont leurs propres délais.
+
+### Suivre le job et récupérer ses sorties
+
+```sh
+curl http://127.0.0.1:8080/jobs/de4d6520-c804-46bb-812e-e221108c9cf9
+
+curl -f -o image.webp \
+  http://127.0.0.1:8080/jobs/de4d6520-c804-46bb-812e-e221108c9cf9/outputs/image.webp
+```
+
+- `GET /jobs/{jobId}` renvoie `200 OK` avec le statut, le pipeline, le nombre de
+  tentatives, `retryAt` (horodatage Unix en millisecondes ou `null`) et les
+  sorties disponibles. Les états terminaux sont `completed`, `failed` et
+  `cancelled`. Dès `published`, les sorties sont téléchargeables. Le suivi
+  retrouve aussi les jobs reçus par dossier surveillé.
+- `GET /jobs/{jobId}/outputs/{name}` renvoie le fichier avec son type MIME.
+  Une sortie demandée pendant l’attente du rendu renvoie `409 Conflict`.
+  Un job inconnu ou une sortie introuvable renvoie `404 Not Found`. Les
+  fichiers restent téléchargeables tant que leur lot est présent dans le
+  répertoire de sortie configuré.
+- L’envoi renvoie `400` pour un corps vide, `413` si la taille est dépassée,
+  `415` si le type ou l’encodage HTTP est refusé et `422` si l’image est
+  invalide ou ne correspond pas au type déclaré. L’admission valide une
+  image à la fois. Un envoi concurrent reçoit `503` avec `Retry-After: 1`.
+
 ## Exemples pour Docker Compose
 
 | Configuration                                               | Usage                                                                                                                                                           | Fichiers dans `data/output/<id-de-job>/`                                           | Cache BEN2 |

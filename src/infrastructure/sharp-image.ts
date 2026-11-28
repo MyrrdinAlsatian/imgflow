@@ -8,6 +8,16 @@ const supportedFormats = new Set(["jpeg", "png", "webp"]);
 const inputPixelLimit = maxImagePixels;
 const maskSize = 1024;
 
+type ImageReadFailure = { message: string; cause: unknown };
+
+function parseImageReadFailure(error: unknown): ImageReadFailure {
+  return { message: error instanceof Error ? error.message : String(error), cause: error };
+}
+
+function imageReadError(source: string, failure: ImageReadFailure): Error {
+  return new Error(`Could not read image ${source}: ${failure.message}`, { cause: failure.cause });
+}
+
 // Release input file handles before the watcher moves originals on Windows.
 sharp.cache({ files: 0 });
 
@@ -22,17 +32,33 @@ export async function openSharpImage(inputPath: string): Promise<Sharp> {
   if (!(await stat(inputPath)).isFile()) {
     throw new Error(`Input must be a regular file: "${inputPath}".`);
   }
-  const image = sharp(inputPath, { failOn: "warning", limitInputPixels: inputPixelLimit });
+
+  return openImage(inputPath);
+}
+
+async function openImage(input: string | Buffer, expectedFormat?: string): Promise<Sharp> {
+  const image = sharp(input, { failOn: "warning", limitInputPixels: inputPixelLimit });
+  const source = Buffer.isBuffer(input) ? "upload" : `"${input}"`;
+  
   const metadata = await image.metadata().catch((error: unknown) => {
-    throw new Error(
-      `Could not read image "${inputPath}": ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    );
+    throw imageReadError(source, parseImageReadFailure(error));
   });
+  
   if (!supportedFormats.has(metadata.format) || (metadata.pages ?? 1) !== 1) {
-    throw new Error(`Input must be a single-frame JPEG, PNG or WebP: "${inputPath}".`);
+    throw new Error(`Input must be a single-frame JPEG, PNG or WebP: ${source}.`);
   }
+
+  if (expectedFormat && metadata.format !== expectedFormat) {
+    throw new Error("The image format does not match the declared media type.");
+  }
+  
   return image;
+}
+
+/** Verifies the declared format and decodes all pixels before an upload is admitted. */
+export async function validateImageUpload(data: Buffer, format: string): Promise<void> {
+  const image = await openImage(data, format);
+  await image.stats();
 }
 
 /**
@@ -45,13 +71,16 @@ export async function readRgba(image: Sharp) {
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
-  const raw = { width: info.width, height: info.height, channels: 4 } as const;
-  return { data, raw };
+  
+    const raw = { width: info.width, height: info.height, channels: 4 } as const;
+  
+    return { data, raw };
 }
 
 /** Completes pending operations so Sharp cannot reorder two configured steps. */
 export async function materialize(image: Sharp): Promise<Sharp> {
   const { data, raw } = await readRgba(image);
+  
   return sharp(data, { raw });
 }
 
@@ -67,15 +96,19 @@ export async function materialize(image: Sharp): Promise<Sharp> {
 export async function applyForeground(image: Sharp, remove: BackgroundRemover): Promise<Sharp> {
   const { data: pixels, raw } = await readRgba(image);
   const { width, height } = raw;
+  
   const rgb = await sharp(pixels, { raw })
     .resize(maskSize, maskSize, { fit: "inside", withoutEnlargement: true })
     .removeAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
-  const mask = await remove({ width: rgb.info.width, height: rgb.info.height, pixels: rgb.data });
-  if (mask.length !== rgb.info.width * rgb.info.height) {
+  
+    const mask = await remove({ width: rgb.info.width, height: rgb.info.height, pixels: rgb.data });
+  
+    if (mask.length !== rgb.info.width * rgb.info.height) {
     throw new Error("Background remover returned an invalid foreground mask.");
   }
+  
   const opacity =
     rgb.info.width === width && rgb.info.height === height
       ? mask
@@ -84,10 +117,13 @@ export async function applyForeground(image: Sharp, remove: BackgroundRemover): 
           .toColourspace("b-w")
           .raw()
           .toBuffer();
+
   let offset = 3;
+  
   for (const alpha of opacity) {
     pixels[offset] = Math.round((pixels.readUInt8(offset) * alpha) / 255);
     offset += 4;
   }
+  
   return sharp(pixels, { raw });
 }

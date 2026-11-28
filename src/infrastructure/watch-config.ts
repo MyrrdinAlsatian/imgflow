@@ -23,34 +23,43 @@ const pathSchema = v.pipe(
   v.string(),
   v.check((value) => value.trim().length > 0, "Expected a path."),
 );
+
 const nameSchema = v.pipe(
   v.string(),
   v.regex(/^[a-z0-9][a-z0-9_-]{0,63}$/i, "Expected a portable name."),
   v.check((value) => !/^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(value), "Name is reserved."),
 );
+
 const color = v.pipe(v.string(), v.regex(/^#[0-9a-f]{6}$/i, "Expected an opaque #RRGGBB color."));
 const positive = v.pipe(v.number(), v.safeInteger(), v.minValue(1));
 const dimension = v.pipe(positive, v.maxValue(maxImageDimension));
 const quality = v.pipe(positive, v.maxValue(maxImageQuality));
 const proportion = v.pipe(v.number(), v.finite(), v.minValue(0), v.maxValue(1));
 const cropMargin = v.optional(proportion, autoCropDefaults.padding);
+
 const cropPadding = v.union([
   proportion,
   v.strictObject({ top: cropMargin, right: cropMargin, bottom: cropMargin, left: cropMargin }),
 ]);
+
 const byte = v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(255));
+
 const backgroundColor = v.union([v.literal("transparent"), color]);
+
 const aspectRatio = v.pipe(
   v.string(),
   v.regex(/^[1-9][0-9]{0,4}:[1-9][0-9]{0,4}$/, "Expected a positive integer ratio such as 4:5."),
   v.transform((value) => {
     const [width, height] = value.split(":").map(Number);
+
     return reduceAspectRatio(width!, height!);
   }),
   v.check(fitsImageCanvas, "The smallest canvas for this ratio exceeds the image limits."),
 );
+
 const name = v.optional(nameSchema, "image");
 const variantResize = v.strictObject({ width: dimension, height: dimension });
+
 const variantEffects = v.pipe(
   v.strictObject({
     blurSigma: v.optional(
@@ -75,6 +84,7 @@ const variantEffects = v.pipe(
     "Configure at least one image effect.",
   ),
 );
+
 const variantOptions = {
   resize: v.optional(variantResize),
   effects: v.optional(variantEffects),
@@ -190,6 +200,13 @@ const step = v.variant("type", [
 ]);
 
 const settings = v.strictObject({
+  http: v.optional(
+    v.strictObject({
+      host: v.optional(v.picklist(["127.0.0.1", "::1", "0.0.0.0", "::"]), "127.0.0.1"),
+      port: v.optional(v.pipe(positive, v.maxValue(65_535)), 8080),
+      maxUploadBytes: v.optional(v.pipe(positive, v.maxValue(100 * 1024 * 1024)), 20 * 1024 * 1024),
+    }),
+  ),
   concurrency: v.optional(positive, 1),
   stabilityMs: v.optional(v.pipe(positive, v.maxValue(2_147_483_647)), 2000),
   modelCache: v.optional(pathSchema, "models"),
@@ -227,15 +244,32 @@ const schema = v.strictObject({
 /** Formats a schema issue path with dotted keys and bracketed array indexes. */
 function issuePath(issue: v.BaseIssue<unknown>): string {
   const keys = issue.path ?? [];
+
   return (
     keys
-      .map(({ key }, index) =>
-        typeof key === "number"
-          ? `[${key}]`
-          : typeof key === "string"
-            ? `${index === 0 ? "" : "."}${key}`
-            : "",
-      )
+      .map(({ key }, index) => {
+        const parsedKey = v.safeParse(
+          v.union([
+            v.pipe(
+              v.number(),
+              v.safeInteger(),
+              v.minValue(0),
+              v.transform((value) => ({ kind: "index" as const, value })),
+            ),
+            v.pipe(
+              v.string(),
+              v.transform((value) => ({ kind: "property" as const, value })),
+            ),
+          ]),
+          key,
+        );
+
+        if (!parsedKey.success) return "";
+
+        return parsedKey.output.kind === "index"
+          ? `[${parsedKey.output.value}]`
+          : `${index === 0 ? "" : "."}${parsedKey.output.value}`;
+      })
       .join("") || "configuration"
   );
 }
@@ -247,13 +281,16 @@ async function physicalPath(path: string): Promise<string> {
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
     const parent = dirname(path);
+    
     if (parent === path) return path;
+    
     return join(await physicalPath(parent), relative(parent, path));
   }
 }
 
 function includesPath(parent: string, child: string): boolean {
   const fromParent = relative(parent, child);
+  
   return (
     fromParent === "" ||
     (!isAbsolute(fromParent) && fromParent !== ".." && !fromParent.startsWith(`..${sep}`))
@@ -271,9 +308,11 @@ function includesPath(parent: string, child: string): boolean {
 export async function loadWatchConfig(file: string) {
   const path = resolve(file);
   const base = dirname(path);
+  
   try {
     const yaml: unknown = parse(await readFile(path, "utf8"), { uniqueKeys: true });
     const result = v.safeParse(schema, yaml);
+  
     if (!result.success) {
       throw new Error(
         result.issues.map((issue) => `${issuePath(issue)}: ${issue.message}`).join("\n"),
@@ -281,6 +320,7 @@ export async function loadWatchConfig(file: string) {
     }
 
     const stateDirectory = resolve(base, result.output.settings.stateDirectory);
+  
     const directoriesSeen = [
       {
         field: "settings.stateDirectory",
@@ -292,19 +332,25 @@ export async function loadWatchConfig(file: string) {
         }),
       },
     ];
+  
     const pipelines = [];
+  
     for (const [id, pipeline] of Object.entries(result.output.pipelines)) {
       const prefix = `pipelines.${id}`;
       const steps = pipeline.steps;
+  
       for (const [index, current] of steps.entries()) {
         const field = `${prefix}.steps[${index}]`;
         const last = index === steps.length - 1;
+  
         if (last !== (current.type === "export")) {
           throw new Error(`${field}.type: exactly one export step is required at the end.`);
         }
+  
         if (current.type === "normalize" && index !== 0) {
           throw new Error(`${field}.type: normalize can only be the first step.`);
         }
+  
         if (
           current.type === "resize" &&
           current.fit !== "inside" &&
@@ -312,10 +358,13 @@ export async function loadWatchConfig(file: string) {
         ) {
           throw new Error(`${field}.width: the resize canvas must not exceed 64 million pixels.`);
         }
+  
         if (current.type === "export") {
           const names = new Set<string>();
+  
           for (const [variantIndex, variant] of current.variants.entries()) {
             const fileName = variantFileName(variant).toLowerCase();
+  
             if (names.has(fileName))
               throw new Error(
                 `${field}.variants[${variantIndex}].name: duplicate output filename "${fileName}".`,
@@ -332,19 +381,24 @@ export async function loadWatchConfig(file: string) {
         archive: pipeline.archive,
         failed: pipeline.failed,
       };
+      
       for (const [key, location] of Object.entries(directoryFields)) {
         const field = `${prefix}.${key}`;
+      
         const canonical = await physicalPath(resolve(base, location)).catch((error: unknown) => {
           throw new Error(`${field}: ${error instanceof Error ? error.message : String(error)}`, {
             cause: error,
           });
         });
+      
         const overlap = directoriesSeen.find(
           (entry) => includesPath(entry.path, canonical) || includesPath(canonical, entry.path),
         );
+      
         if (overlap) throw new Error(`${field}: directory overlaps ${overlap.field}.`);
         directoriesSeen.push({ field, path: canonical });
       }
+      
       const directories: WatchDirectories = {
         input: resolve(base, directoryFields.watch),
         processing: resolve(base, directoryFields.processing),
@@ -363,6 +417,7 @@ export async function loadWatchConfig(file: string) {
         directories,
       });
     }
+    
     return {
       settings: {
         ...result.output.settings,
