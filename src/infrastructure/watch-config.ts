@@ -281,16 +281,16 @@ async function physicalPath(path: string): Promise<string> {
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
     const parent = dirname(path);
-    
+
     if (parent === path) return path;
-    
+
     return join(await physicalPath(parent), relative(parent, path));
   }
 }
 
 function includesPath(parent: string, child: string): boolean {
   const fromParent = relative(parent, child);
-  
+
   return (
     fromParent === "" ||
     (!isAbsolute(fromParent) && fromParent !== ".." && !fromParent.startsWith(`..${sep}`))
@@ -308,11 +308,11 @@ function includesPath(parent: string, child: string): boolean {
 export async function loadWatchConfig(file: string) {
   const path = resolve(file);
   const base = dirname(path);
-  
+
   try {
     const yaml: unknown = parse(await readFile(path, "utf8"), { uniqueKeys: true });
     const result = v.safeParse(schema, yaml);
-  
+
     if (!result.success) {
       throw new Error(
         result.issues.map((issue) => `${issuePath(issue)}: ${issue.message}`).join("\n"),
@@ -320,7 +320,7 @@ export async function loadWatchConfig(file: string) {
     }
 
     const stateDirectory = resolve(base, result.output.settings.stateDirectory);
-  
+
     const directoriesSeen = [
       {
         field: "settings.stateDirectory",
@@ -332,25 +332,25 @@ export async function loadWatchConfig(file: string) {
         }),
       },
     ];
-  
+
     const pipelines = [];
-  
+
     for (const [id, pipeline] of Object.entries(result.output.pipelines)) {
       const prefix = `pipelines.${id}`;
       const steps = pipeline.steps;
-  
+
       for (const [index, current] of steps.entries()) {
         const field = `${prefix}.steps[${index}]`;
         const last = index === steps.length - 1;
-  
+
         if (last !== (current.type === "export")) {
           throw new Error(`${field}.type: exactly one export step is required at the end.`);
         }
-  
+
         if (current.type === "normalize" && index !== 0) {
           throw new Error(`${field}.type: normalize can only be the first step.`);
         }
-  
+
         if (
           current.type === "resize" &&
           current.fit !== "inside" &&
@@ -358,13 +358,13 @@ export async function loadWatchConfig(file: string) {
         ) {
           throw new Error(`${field}.width: the resize canvas must not exceed 64 million pixels.`);
         }
-  
+
         if (current.type === "export") {
           const names = new Set<string>();
-  
+
           for (const [variantIndex, variant] of current.variants.entries()) {
             const fileName = variantFileName(variant).toLowerCase();
-  
+
             if (names.has(fileName))
               throw new Error(
                 `${field}.variants[${variantIndex}].name: duplicate output filename "${fileName}".`,
@@ -381,24 +381,24 @@ export async function loadWatchConfig(file: string) {
         archive: pipeline.archive,
         failed: pipeline.failed,
       };
-      
+
       for (const [key, location] of Object.entries(directoryFields)) {
         const field = `${prefix}.${key}`;
-      
+
         const canonical = await physicalPath(resolve(base, location)).catch((error: unknown) => {
           throw new Error(`${field}: ${error instanceof Error ? error.message : String(error)}`, {
             cause: error,
           });
         });
-      
+
         const overlap = directoriesSeen.find(
           (entry) => includesPath(entry.path, canonical) || includesPath(canonical, entry.path),
         );
-      
+
         if (overlap) throw new Error(`${field}: directory overlaps ${overlap.field}.`);
         directoriesSeen.push({ field, path: canonical });
       }
-      
+
       const directories: WatchDirectories = {
         input: resolve(base, directoryFields.watch),
         processing: resolve(base, directoryFields.processing),
@@ -417,7 +417,7 @@ export async function loadWatchConfig(file: string) {
         directories,
       });
     }
-    
+
     return {
       settings: {
         ...result.output.settings,

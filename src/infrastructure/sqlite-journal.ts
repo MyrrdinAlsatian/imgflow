@@ -6,7 +6,8 @@ import type { JobJournal } from "../application/job-journal.ts";
 import type { JobRecord } from "../domain/job.ts";
 
 const active = "status NOT IN ('completed', 'failed', 'cancelled')";
-const fields = "id, name, scope, signature, status, attempts, retry_at AS retryAt, last_error AS error";
+const fields =
+  "id, name, scope, signature, status, attempts, retry_at AS retryAt, last_error AS error";
 
 /**
  * Opens the history database and reserves the state directory for one running service.
@@ -20,9 +21,8 @@ export async function openJobJournal(directory: string) {
   await mkdir(directory, { recursive: true });
   // A separate SQLite file provides an OS-released service lock without blocking history readers.
   const lock = new DatabaseSync(join(directory, "service-lock.sqlite"));
-  
-  try {
 
+  try {
     lock.exec("BEGIN EXCLUSIVE");
   } catch (error) {
     lock.close();
@@ -31,7 +31,7 @@ export async function openJobJournal(directory: string) {
 
   try {
     const db = openJournalDatabase(directory, false);
-  
+
     try {
       const journal = createJournal(db);
 
@@ -44,7 +44,7 @@ export async function openJobJournal(directory: string) {
           LIMIT 20
         )
       `);
-  
+
       return {
         journal,
         /** Estimates render duration from recent successful attempts in the same pipeline. */
@@ -82,10 +82,10 @@ export async function openJobJournal(directory: string) {
  */
 export function openJournalDatabase(directory: string, readOnly: boolean): DatabaseSync {
   const db = new DatabaseSync(join(directory, "jobs.sqlite"), { readOnly });
-  
+
   try {
     db.exec("PRAGMA busy_timeout = 2000");
-  
+
     return db;
   } catch (error) {
     db.close();
@@ -113,11 +113,11 @@ export function ensureRetryTable(db: DatabaseSync): void {
  */
 export function writeJournal<T>(db: DatabaseSync, run: () => T): T {
   db.exec("BEGIN IMMEDIATE");
-  
+
   try {
     const result = run();
     db.exec("COMMIT");
-  
+
     return result;
   } catch (error) {
     if (db.isTransaction) db.exec("ROLLBACK");
@@ -145,34 +145,34 @@ function createJournal(db: DatabaseSync): JobJournal {
     ) STRICT;
   `);
   ensureRetryTable(db);
-  
+
   const insert = db.prepare(`INSERT INTO jobs
     (id, scope, name, layout, signature, status, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-  
+
   const find = db.prepare(`SELECT ${fields} FROM jobs WHERE id = ?`);
-  
+
   const retrySource = db.prepare(`
     SELECT source.id, source.name, source.scope
     FROM manual_retries AS retry JOIN jobs AS source ON source.id = retry.source_job_id
     WHERE retry.job_id = ?
   `);
-  
+
   const findClaim = db.prepare(
     `SELECT ${fields} FROM jobs WHERE scope = ? AND name = ? AND status = 'claiming'`,
   );
-  
+
   const unfinished = db.prepare(
     `SELECT ${fields} FROM jobs WHERE scope = ? AND ${active} ORDER BY created_at, id`,
   );
-  
+
   const layouts = db.prepare(`SELECT DISTINCT scope, layout FROM jobs WHERE ${active}`);
-  
+
   const set =
     db.prepare(`UPDATE jobs SET status = ?, retry_at = NULL, last_error = ?, result_path = ?,
     output_path = COALESCE(?, output_path), updated_at = ? WHERE id = ?`);
-  
-    const start = db.prepare(
+
+  const start = db.prepare(
     `UPDATE jobs SET status = 'running', attempts = ?, retry_at = NULL, updated_at = ? WHERE id = ?`,
   );
 
@@ -191,13 +191,13 @@ function createJournal(db: DatabaseSync): JobJournal {
   // The strict table and the shared SELECT projection define the record shape.
   // SAFETY: SQLite's shared projection contains exactly the fields required by JobRecord.
   const read = (id: string) => find.get(id) as JobRecord | undefined;
-  
+
   return {
     add(job, layout, signature) {
       const status = signature === null ? "pending" : "claiming";
       const now = Date.now();
       insert.run(job.id, job.scope, job.name, layout, signature, status, now, now);
-  
+
       return { ...job, signature, status, attempts: 0, retryAt: null, error: null };
     },
     find: read,

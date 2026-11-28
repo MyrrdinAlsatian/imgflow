@@ -33,7 +33,7 @@ function hasCode(error: unknown, code: string): boolean {
 export async function readFileStamp(path: string): Promise<BigIntStats | undefined> {
   try {
     const stamp = await lstat(path, { bigint: true });
-    
+
     return stamp.isFile() ? stamp : undefined;
   } catch (error) {
     if (hasCode(error, "ENOENT")) return undefined;
@@ -60,15 +60,15 @@ export function fileSignature(stamp: BigIntStats): string {
 
 async function digest(path: string): Promise<string> {
   const hash = createHash("sha256");
-  
+
   for await (const chunk of createReadStream(path)) hash.update(chunk);
-  
+
   return hash.digest("hex");
 }
 
 async function syncPath(path: string, flags: "r" | "r+"): Promise<void> {
   const handle = await open(path, flags);
-  
+
   try {
     await handle.sync();
   } finally {
@@ -90,27 +90,27 @@ async function copyOriginal(
   expected: BigIntStats,
 ): Promise<boolean> {
   const temporary = join(dirname(destination), `.transfer-${randomUUID()}`);
-  
+
   try {
     await copyFile(source, temporary, constants.COPYFILE_EXCL);
     const [sourceHash, copyHash] = await Promise.all([digest(source), digest(temporary)]);
-  
+
     if (!sameFile(expected, await readFileStamp(source))) return false;
-  
+
     if (sourceHash !== copyHash) throw new Error(`Copied file did not match "${source}".`);
 
     // Windows needs a writable handle to flush the working copy, even for read-only originals.
     if (process.platform === "win32" && !(expected.mode & 0o200n)) {
       await chmod(temporary, 0o600);
     }
-  
+
     await syncPath(temporary, process.platform === "win32" ? "r+" : "r");
-  
+
     await rename(temporary, destination);
     // Windows does not expose directory handles that can be flushed through fs.open.
-  
+
     if (process.platform !== "win32") await syncPath(dirname(destination), "r");
-  
+
     return true;
   } finally {
     await rm(temporary, { force: true });
@@ -136,26 +136,26 @@ export async function moveOriginal(
   renameSource = rename,
 ): Promise<boolean> {
   if (!sameFile(expected, await readFileStamp(source))) return false;
-  
+
   try {
     await renameSource(source, destination);
-  
+
     return true;
   } catch (error) {
     if (hasCode(error, "ENOENT") && !(await readFileStamp(source))) return false;
-  
+
     if (!hasCode(error, "EXDEV")) throw error;
   }
 
   try {
     if (!(await copyOriginal(source, destination, expected))) return false;
-  
+
     if (!sameFile(expected, await readFileStamp(source))) {
       throw new Error(`Source changed after copying "${source}". The copy is at "${destination}".`);
     }
-  
+
     await unlink(source);
-  
+
     return true;
   } catch (error) {
     throw new Error(`Could not transfer "${source}" to "${destination}".`, { cause: error });
@@ -174,7 +174,7 @@ export type WatchDirectories = Readonly<{
 /** Directory layout used by the single-folder CLI. */
 export function watchDirectories(root: string): WatchDirectories {
   const base = resolve(root);
-  
+
   return {
     input: join(base, "input"),
     processing: join(base, "processing"),
@@ -202,7 +202,7 @@ export async function openWatchStorage({
 }: WatchDirectories) {
   for (const directory of [input, processing, output, archive, failed]) {
     await mkdir(directory, { recursive: true });
-  
+
     if (!(await lstat(directory)).isDirectory()) {
       throw new Error(`Expected a directory at "${directory}".`);
     }
@@ -218,7 +218,7 @@ export async function openWatchStorage({
     ) {
       throw new Error(`Invalid recorded job paths for "${job.id}".`);
     }
-  
+
     return { id: job.id, name: job.name, path: join(processing, job.id, job.name) };
   }
 
@@ -244,7 +244,7 @@ export async function openWatchStorage({
         `Different originals at "${source}" and "${destination}". Both were retained.`,
       );
     }
-  
+
     await unlink(source);
   }
 
@@ -256,19 +256,19 @@ export async function openWatchStorage({
 
   async function retain(job: ClaimedImage, destination: string): Promise<string> {
     const stamp = await readFileStamp(job.path);
-  
+
     if (await readFileStamp(destination)) {
       if (stamp) await removeDuplicate(job.path, destination, stamp);
     } else if (!stamp || !(await moveOriginal(job.path, destination, stamp))) {
       throw new Error(`Claimed original changed or disappeared: "${job.path}".`);
     }
-  
+
     const directory = dirname(job.path);
     await cleanTransfers(directory);
     await rmdir(directory).catch((error: unknown) => {
       if (!hasCode(error, "ENOENT") && !hasCode(error, "ENOTEMPTY")) throw error;
     });
-  
+
     return destination;
   }
 
@@ -277,7 +277,7 @@ export async function openWatchStorage({
   const storage: WatchJobStorage = {
     async published(job) {
       const path = join(output, job.id);
-  
+
       try {
         if (
           !(await lstat(path)).isDirectory() ||
@@ -285,7 +285,7 @@ export async function openWatchStorage({
         ) {
           throw new Error(`Published batch is not a populated directory: "${path}".`);
         }
-  
+
         return path;
       } catch (error) {
         if (hasCode(error, "ENOENT")) return undefined;
@@ -294,7 +294,7 @@ export async function openWatchStorage({
     },
     async failed(job) {
       const path = join(failed, job.id, "original", job.name);
-  
+
       return (await readFileStamp(path)) ? path : undefined;
     },
     async discardStaging(job) {
@@ -304,20 +304,20 @@ export async function openWatchStorage({
       const staging = stagingPath(job.id);
       await mkdir(staging);
       const destination = join(output, job.id);
-  
+
       try {
         const files = await render(job.path, staging);
-  
+
         if (!files.length) throw new Error("The renderer produced no variants.");
-  
+
         for (const file of files) await syncPath(join(staging, file.name), "r+");
-  
+
         if (process.platform !== "win32") await syncPath(staging, "r");
-  
+
         await rename(staging, destination);
-  
+
         if (process.platform !== "win32") await syncPath(output, "r");
-  
+
         return files.map(({ name, dimensions }) => ({ path: join(destination, name), dimensions }));
       } finally {
         await rm(staging, { recursive: true, force: true });
@@ -326,25 +326,25 @@ export async function openWatchStorage({
     async archive(job) {
       const destination = join(archive, job.id);
       await mkdir(destination, { recursive: true });
-  
+
       return retain(job, join(destination, job.name));
     },
     async fail(job, error) {
       const directory = join(failed, job.id);
       const original = join(directory, "original");
       await mkdir(original, { recursive: true });
-  
+
       const details = {
         jobId: job.id,
         name: job.name,
         message: error instanceof Error ? error.message : String(error),
       };
-  
+
       const temporary = join(directory, ".error.json.tmp");
-  
+
       await writeFile(temporary, JSON.stringify(details, null, 2) + "\n");
       await rename(temporary, join(directory, "error.json"));
-  
+
       return retain(job, join(original, job.name));
     },
   };
@@ -382,21 +382,21 @@ export async function openWatchStorage({
     /** Finds complete originals placed in processing before a journal record was available. */
     async recoverableJobs() {
       const jobs: JobIdentity[] = [];
-      
+
       for (const directory of await entries(processing)) {
         if (!directory.isDirectory() || !uuid.test(directory.name)) continue;
-      
+
         const originals = (await entries(join(processing, directory.name))).filter(
           (entry) => entry.isFile() && !transfer.test(entry.name),
         );
-      
+
         const [original] = originals;
-      
+
         if (originals.length === 1 && original) {
           jobs.push({ id: directory.name, name: original.name, scope: input });
         }
       }
-      
+
       return jobs;
     },
     /**
@@ -411,22 +411,22 @@ export async function openWatchStorage({
       const source = join(input, job.name);
       const stamp = await readFileStamp(source);
       const matches = stamp && fileSignature(stamp) === record.signature;
-      
+
       if (await readFileStamp(job.path)) {
         if (matches) await removeDuplicate(source, job.path, stamp);
         await cleanTransfers(dirname(job.path));
-      
+
         return true;
       }
-      
+
       if (!matches) return false;
-      
+
       await mkdir(dirname(job.path), { recursive: true });
-      
+
       if (!(await moveOriginal(source, job.path, stamp))) return false;
-      
+
       await cleanTransfers(dirname(job.path));
-      
+
       return true;
     },
     /**
@@ -439,27 +439,27 @@ export async function openWatchStorage({
      */
     async restoreRetry(job: ClaimedImage, previous: JobIdentity): Promise<boolean> {
       const source = claimed(previous);
-      
+
       if (previous.scope !== input || source.name !== job.name) {
         throw new Error(`Retry source does not match job "${job.id}".`);
       }
-      
+
       const directory = dirname(job.path);
-      
+
       if (!(await readFileStamp(job.path))) {
         const path = join(failed, source.id, "original", source.name);
         const stamp = await readFileStamp(path);
-      
+
         if (!stamp) return false;
         await mkdir(directory, { recursive: true });
-      
+
         if (!(await copyOriginal(path, job.path, stamp))) {
           throw new Error(`Retained original changed while copying "${path}".`);
         }
       }
-      
+
       await cleanTransfers(directory);
-      
+
       return true;
     },
   };

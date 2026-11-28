@@ -17,26 +17,26 @@ import { runWatchFolders } from "./watch-folder.ts";
  */
 export async function runConfiguredWatch(file: string, shutdown: AbortSignal): Promise<void> {
   const { settings, pipelines } = await loadWatchConfig(file);
-  
+
   if (shutdown.aborted) return;
-  
+
   const needsModel = pipelines.some(({ steps }) =>
     steps.some((step) => step.type === "remove-background"),
   );
-  
+
   const model = needsModel
     ? await (await import("./ben2.ts")).openBen2(settings.modelCache)
     : undefined;
-  
-    try {
+
+  try {
     // Keep inference serial even if independent image jobs can run concurrently.
     const inference = new PQueue({ concurrency: 1 });
-  
+
     const remove: BackgroundRemover | undefined = model
       ? (image) => inference.add(() => model.remove(image))
       : undefined;
-  
-      await runWatchFolders(
+
+    await runWatchFolders(
       pipelines.map(({ id, directories, steps }) => ({
         id,
         directories,

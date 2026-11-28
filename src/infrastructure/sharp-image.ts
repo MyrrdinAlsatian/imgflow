@@ -39,11 +39,11 @@ export async function openSharpImage(inputPath: string): Promise<Sharp> {
 async function openImage(input: string | Buffer, expectedFormat?: string): Promise<Sharp> {
   const image = sharp(input, { failOn: "warning", limitInputPixels: inputPixelLimit });
   const source = Buffer.isBuffer(input) ? "upload" : `"${input}"`;
-  
+
   const metadata = await image.metadata().catch((error: unknown) => {
     throw imageReadError(source, parseImageReadFailure(error));
   });
-  
+
   if (!supportedFormats.has(metadata.format) || (metadata.pages ?? 1) !== 1) {
     throw new Error(`Input must be a single-frame JPEG, PNG or WebP: ${source}.`);
   }
@@ -51,7 +51,7 @@ async function openImage(input: string | Buffer, expectedFormat?: string): Promi
   if (expectedFormat && metadata.format !== expectedFormat) {
     throw new Error("The image format does not match the declared media type.");
   }
-  
+
   return image;
 }
 
@@ -71,16 +71,16 @@ export async function readRgba(image: Sharp) {
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
-  
-    const raw = { width: info.width, height: info.height, channels: 4 } as const;
-  
-    return { data, raw };
+
+  const raw = { width: info.width, height: info.height, channels: 4 } as const;
+
+  return { data, raw };
 }
 
 /** Completes pending operations so Sharp cannot reorder two configured steps. */
 export async function materialize(image: Sharp): Promise<Sharp> {
   const { data, raw } = await readRgba(image);
-  
+
   return sharp(data, { raw });
 }
 
@@ -96,19 +96,19 @@ export async function materialize(image: Sharp): Promise<Sharp> {
 export async function applyForeground(image: Sharp, remove: BackgroundRemover): Promise<Sharp> {
   const { data: pixels, raw } = await readRgba(image);
   const { width, height } = raw;
-  
+
   const rgb = await sharp(pixels, { raw })
     .resize(maskSize, maskSize, { fit: "inside", withoutEnlargement: true })
     .removeAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
-  
-    const mask = await remove({ width: rgb.info.width, height: rgb.info.height, pixels: rgb.data });
-  
-    if (mask.length !== rgb.info.width * rgb.info.height) {
+
+  const mask = await remove({ width: rgb.info.width, height: rgb.info.height, pixels: rgb.data });
+
+  if (mask.length !== rgb.info.width * rgb.info.height) {
     throw new Error("Background remover returned an invalid foreground mask.");
   }
-  
+
   const opacity =
     rgb.info.width === width && rgb.info.height === height
       ? mask
@@ -119,11 +119,11 @@ export async function applyForeground(image: Sharp, remove: BackgroundRemover): 
           .toBuffer();
 
   let offset = 3;
-  
+
   for (const alpha of opacity) {
     pixels[offset] = Math.round((pixels.readUInt8(offset) * alpha) / 255);
     offset += 4;
   }
-  
+
   return sharp(pixels, { raw });
 }
